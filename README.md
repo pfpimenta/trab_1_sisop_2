@@ -2,10 +2,10 @@
 Trabalho Prático 1 da disciplina de Sistemas Operacionais 2 (UFRGS) no semestre 2020/2 (que excepcionalmente se passa em 2021).
 
 ## Integrantes do grupo
-André Carini
-Lucas Assis
-Pedro Foletto Pimenta
-Roberta Robert
+- André Carini
+- Lucas Assis
+- Pedro Foletto Pimenta
+- Roberta Robert
 
 ## Especificação
 A proposta de trabalho prático é implementar um serviço de envio de notificações estilo “feed de notícias”, muito similar ao Twitter. Os usuários farão uso do serviço por meio de perfis, postando notificações em nome de um determinado perfil, e que serão recebidas por todos os seguidores desse perfil. Observe que a ideia de perfis, no contexto desta proposta de trabalho prático, é similar aos perfis em redes sociais como o Twitter (por ex., @ufrgs).
