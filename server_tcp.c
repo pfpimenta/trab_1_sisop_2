@@ -32,34 +32,33 @@ typedef struct __notification{
     uint16_t pending; // Quantidade de leitores pendentes
 } notification;
 
-
-void read_message(int newsockfd, char buffer)
+// writes a message from a socket (receives a message through it)
+void read_message(int newsockfd, char* buffer)
 {
 	/* read from the socket */
-    /*
     int n;
 	n = read(newsockfd, buffer, 256);
 	if (n < 0) 
 		printf("ERROR reading from socket");
-	printf("Here is the message: %s\n", buffer);
-    */
 }
 
+// writes a message in a socket (sends a message through it)
 void write_message(int newsockfd, char* message)
 {
 	/* write in the socket */
-	//write_message(newsockfd, message)
     int n;
 	n = write(newsockfd,"I got your message", 18);
 	if (n < 0) 
 		printf("ERROR writing to socket");
 }
 
-struct sockaddr_in setup_socket(int* sockfd)
+// opens a socket, binds it, and starts listening for incoming connections
+int setup_socket()
 {
+	int sockfd;
     struct sockaddr_in serv_addr;
 
-	if ((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
         printf("ERROR opening socket");
 	
 	serv_addr.sin_family = AF_INET;
@@ -67,56 +66,52 @@ struct sockaddr_in setup_socket(int* sockfd)
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(serv_addr.sin_zero), 8);
     
-	if (bind(*sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-		printf("ERROR on binding");
-    
-    return serv_addr;
-}
-
-int main(int argc, char *argv[])
-{
-	int sockfd, newsockfd, n;
-	socklen_t clilen;
-	char buffer[256];
-	struct sockaddr_in serv_addr, cli_addr;
-	
-
-    // setup socket
-    //void setup_socket(int* sockfd)
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        printf("ERROR opening socket");
-	
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(PORT);
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	bzero(&(serv_addr.sin_zero), 8);     
-    
 	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
 		printf("ERROR on binding");
-	
-	listen(sockfd, 5);
-	
     
-    // receive request / init connection
+	listen(sockfd, 5);
+
+    return sockfd;
+}
+
+int accept_connection(int sockfd)
+{
+	int newsockfd; // socket created for the connection
+	socklen_t clilen;
+	struct sockaddr_in cli_addr;
+
 	clilen = sizeof(struct sockaddr_in);
 	if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
 		printf("ERROR on accept");
+
+	return newsockfd;
+}
+
+
+int main(int argc, char *argv[])
+{
+	int sockfd;
+	int newsockfd, n;
+	// socklen_t clilen;
+	char buffer[256];
+	struct sockaddr_in serv_addr, cli_addr;
 	
+    // setup socket
+    sockfd = setup_socket();
+    
+    // receive request / init connection
+	newsockfd = accept_connection(sockfd);
+
+	// make sure buffer is clear	
 	bzero(buffer, 256);
 
-	
 	/* read from the socket */
-	//read_message(newsockfd, message_received);
-	n = read(newsockfd, buffer, 256);
-	if (n < 0) 
-		printf("ERROR reading from socket");
+	read_message(newsockfd, buffer);
 	printf("Here is the message: %s\n", buffer);
 	
 	/* write in the socket */
-	//write_message(newsockfd, message)
-	n = write(newsockfd,"I got your message", 18);
-	if (n < 0) 
-		printf("ERROR writing to socket");
+	strcpy(buffer, "I got your message");
+	write_message(newsockfd, buffer);
 
 	close(newsockfd);
 	close(sockfd);
