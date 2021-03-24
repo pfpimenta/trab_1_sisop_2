@@ -35,6 +35,8 @@ typedef struct __notification{
 // writes a message from a socket (receives a message through it)
 void read_message(int newsockfd, char* buffer)
 {
+	// make sure buffer is clear	
+  	bzero(buffer, 256);
 	/* read from the socket */
     int n;
 	n = read(newsockfd, buffer, 256);
@@ -47,7 +49,7 @@ void write_message(int newsockfd, char* message)
 {
 	/* write in the socket */
     int n;
-	n = write(newsockfd,"I got your message", 18);
+	n = write(newsockfd, message, strlen(message));
 	if (n < 0) 
 		printf("ERROR writing to socket");
 }
@@ -102,16 +104,24 @@ int main(int argc, char *argv[])
     // receive request / init connection
 	newsockfd = accept_connection(sockfd);
 
-	// make sure buffer is clear	
-	bzero(buffer, 256);
+	// loop: receive request and send reply
+	int seqn = 0;
+  	while(1){    
+		/* read from the socket */
+		read_message(newsockfd, buffer);
+		printf("Received message: %s\n", buffer);
 
-	/* read from the socket */
-	read_message(newsockfd, buffer);
-	printf("Here is the message: %s\n", buffer);
-	
-	/* write in the socket */
-	strcpy(buffer, "I got your message");
-	write_message(newsockfd, buffer);
+		// TODO : treat received message
+		// fazer um switch case
+		
+		/* write in the socket */
+		bzero(buffer, sizeof(buffer));
+		// strlen("ACK, 12345678") == 14
+		snprintf(buffer, 14, "ACK, %08d", seqn);
+		printf("Sending message: %s\n", buffer);
+		write_message(newsockfd, buffer);
+		seqn++;
+	}
 
 	close(newsockfd);
 	close(sockfd);
