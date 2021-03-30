@@ -131,9 +131,23 @@ int send_message(int sockfd, int seqn)
     return 1;
 }
 
+// writes a message from a socket (receives a message through it)
+void read_message(int newsockfd, char* buffer)
+{
+	// make sure buffer is clear	
+  bzero(buffer, BUFFER_SIZE);
+	/* read from the socket */
+  int n;
+	n = read(newsockfd, buffer, BUFFER_SIZE);
+	if (n < 0) 
+		printf("ERROR reading from socket");
+}
+
+
 int main(int argc, char *argv[])
 {
   int sockfd, n;
+  int size = 0;
   struct sockaddr_in serv_addr;
   struct hostent *server;
   packet packet_to_send;
@@ -180,9 +194,18 @@ int main(int argc, char *argv[])
   if (n < 0) 
     printf("ERROR writing to socket\n");
   /* read from the socket */
+  bzero(buffer, sizeof(buffer));  
   n = read(sockfd, buffer, BUFFER_SIZE);
   if (n < 0) 
     printf("ERROR reading from socket\n");
+
+  // TODO criar uma thread pra receber notificacoes
+  // TODO criar uma thread pra mandar packets
+  // // create thread for the new socket
+  // if (pthread_create(&tid[i], NULL, socket_thread, &newsockfd) != 0 ) {
+  //   printf("Failed to create thread\n");
+  //   exit(-1);
+  // }
 
 
   ///////////////////////////////////
@@ -190,11 +213,15 @@ int main(int argc, char *argv[])
   while(1){
     send_message(sockfd, seqn);
 
-    /* read from the socket */
-    n = read(sockfd, buffer, BUFFER_SIZE);
-    if (n < 0) 
-      printf("ERROR reading from socket\n");
+    read_message(sockfd, buffer);
     printf("Received from server: %s\n",buffer);
+
+    // /* read from the socket */
+    // bzero(buffer, sizeof(buffer));  
+    // n = read(sockfd, buffer, BUFFER_SIZE);
+    // if (n < 0) 
+    //   printf("ERROR reading from socket\n");
+    // printf("Received from server: %s\n",buffer);
 
     seqn++;
  }

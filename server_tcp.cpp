@@ -37,7 +37,7 @@ typedef struct __notification{
     uint16_t pending; // Quantidade de leitores pendentes
 } notification;
 
-// writes a message from a socket (receives a message through it)
+// reads a message from a socket (receives a message through it)
 void read_message(int newsockfd, char* buffer)
 {
 	// make sure buffer is clear	
@@ -148,7 +148,8 @@ void * socket_thread(void *arg) {
   		bzero(payload, sizeof(payload));
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
 		packet_to_send = create_packet(payload, seqn, 4);
-s		serialize_packet(packet_to_send, reply);
+		serialize_packet(packet_to_send, reply);
+		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
 		write_message(socket, reply);
 		seqn++;
   	}while (size != 0);
