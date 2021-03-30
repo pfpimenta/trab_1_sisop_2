@@ -13,6 +13,8 @@
 #define BUFFER_SIZE 256
 #define MESSAGE_SIZE 128
 
+int seqn = 0;
+
 // TODO : put in another file
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
@@ -90,11 +92,12 @@ int get_packet_type(char* packet_type_string)
   }
 }
 
-packet create_packet(char* message, int packet_seqn, int packet_type)
+packet create_packet(char* message, int packet_type)
 {
   packet packet_to_send;
   packet_to_send._payload = message;
-  packet_to_send.seqn = packet_seqn; 
+  packet_to_send.seqn = seqn;
+  seqn++;
   packet_to_send.length = strlen(packet_to_send._payload);
   packet_to_send.type = packet_type;
   return packet_to_send;
@@ -109,7 +112,7 @@ void serialize_packet(packet packet_to_send, char* buffer)
 }
 
 // asks the user to write a message and then sends it to the server
-int send_message(int sockfd, int seqn)
+int send_user_message(int sockfd)
 {
   packet packet_to_send;
   char buffer[BUFFER_SIZE];
@@ -119,8 +122,9 @@ int send_message(int sockfd, int seqn)
   bzero(message, sizeof(message));  
   fgets(message, MESSAGE_SIZE, stdin);
   message[strlen(message)-1] = 0; // remove '\n'
-  packet_to_send = create_packet(message, seqn, 3);
+  packet_to_send = create_packet(message, 3);
   serialize_packet(packet_to_send, buffer);
+  printf("Sending to server: %s\n",buffer);
   int n = write(sockfd, buffer, strlen(buffer));
   if (n < 0) 
   {
@@ -129,6 +133,16 @@ int send_message(int sockfd, int seqn)
   }
   else
     return 1;
+}
+
+// writes a message in a socket (sends a message through it)
+void write_message(int newsockfd, char* message)
+{
+	/* write in the socket */
+    int n;
+	n = write(newsockfd, message, strlen(message));
+	if (n < 0) 
+		printf("ERROR writing to socket");
 }
 
 // writes a message from a socket (receives a message through it)
@@ -179,7 +193,6 @@ int main(int argc, char *argv[])
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
     printf("ERROR connecting\n");
 
-	int seqn = 0;
 
   //// send CONNECT message
   printf("Please enter your username:");
@@ -187,17 +200,11 @@ int main(int argc, char *argv[])
   fgets(message, MESSAGE_SIZE, stdin);
   message[strlen(message)-1] = 0; // remove '\n'
   /* write buffer in the socket */
-  packet_to_send = create_packet(message, seqn, 0);
-  seqn++;
+  packet_to_send = create_packet(message, 0);
   serialize_packet(packet_to_send, buffer);
-  n = write(sockfd, buffer, strlen(buffer));
-  if (n < 0) 
-    printf("ERROR writing to socket\n");
+  write_message(sockfd, buffer);
   /* read from the socket */
-  bzero(buffer, sizeof(buffer));  
-  n = read(sockfd, buffer, BUFFER_SIZE);
-  if (n < 0) 
-    printf("ERROR reading from socket\n");
+  read_message(sockfd, buffer);
 
   // TODO criar uma thread pra receber notificacoes
   // TODO criar uma thread pra mandar packets
@@ -208,22 +215,14 @@ int main(int argc, char *argv[])
   // }
 
 
+
   ///////////////////////////////////
   //// send MSG messages
   while(1){
-    send_message(sockfd, seqn);
+    send_user_message(sockfd);
 
     read_message(sockfd, buffer);
     printf("Received from server: %s\n",buffer);
-
-    // /* read from the socket */
-    // bzero(buffer, sizeof(buffer));  
-    // n = read(sockfd, buffer, BUFFER_SIZE);
-    // if (n < 0) 
-    //   printf("ERROR reading from socket\n");
-    // printf("Received from server: %s\n",buffer);
-
-    seqn++;
  }
  
 	close(sockfd);

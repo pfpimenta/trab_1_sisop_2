@@ -15,6 +15,8 @@
 #define BUFFER_SIZE 256
 #define MESSAGE_SIZE 128
 
+int seqn = 0;
+
 // TODO : put in another file
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
@@ -107,15 +109,17 @@ void serialize_packet(packet packet_to_send, char* buffer)
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
 
-packet create_packet(char* message, int packet_seqn, int packet_type)
+packet create_packet(char* message, int packet_type)
 {
   packet packet_to_send;
   packet_to_send._payload = message;
-  packet_to_send.seqn = packet_seqn; 
+  packet_to_send.seqn = seqn;
+  seqn++;
   packet_to_send.length = strlen(packet_to_send._payload);
   packet_to_send.type = packet_type;
   return packet_to_send;
 }
+
 
 // controls the client inputs received by socket
 void * socket_thread(void *arg) {
@@ -131,7 +135,6 @@ void * socket_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Socket opened in thread %d\n", (int)thread_id);
 
-	int seqn = 0;
 	do{
 		// receive message
   		bzero(client_message, sizeof(client_message));
@@ -147,11 +150,10 @@ void * socket_thread(void *arg) {
 		reference_seqn = 0; // TODO
   		bzero(payload, sizeof(payload));
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
-		packet_to_send = create_packet(payload, seqn, 4);
+		packet_to_send = create_packet(payload, 4);
 		serialize_packet(packet_to_send, reply);
 		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
 		write_message(socket, reply);
-		seqn++;
   	}while (size != 0);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
