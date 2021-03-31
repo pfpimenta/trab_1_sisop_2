@@ -10,6 +10,7 @@
 #include <netdb.h> 
 #include <pthread.h>
 #include <semaphore.h>
+#include <fcntl.h>
 
 #define PORT 4000
 #define BUFFER_SIZE 256
@@ -126,7 +127,7 @@ void serialize_packet(packet packet_to_send, char* buffer)
 }
 
 // asks the user to write a message and then sends it to the server
-int send_user_message(int sockfd)
+int send_user_message(int socketfd)
 {
   packet packet_to_send;
   char buffer[BUFFER_SIZE];
@@ -139,7 +140,7 @@ int send_user_message(int sockfd)
   packet_to_send = create_packet(message, 3);
   serialize_packet(packet_to_send, buffer);
   printf("Sending to server: %s\n",buffer);
-  int n = write(sockfd, buffer, strlen(buffer));
+  int n = write(socketfd, buffer, strlen(buffer));
   if (n < 0) 
   {
     printf("ERROR writing to socket\n");
@@ -150,23 +151,23 @@ int send_user_message(int sockfd)
 }
 
 // writes a message in a socket (sends a message through it)
-void write_message(int newsockfd, char* message)
+void write_message(int socketfd, char* message)
 {
 	/* write in the socket */
     int n;
-	n = write(newsockfd, message, strlen(message));
+	n = write(socketfd, message, strlen(message));
 	if (n < 0) 
 		printf("ERROR writing to socket");
 }
 
 // reads a message from a socket (receives a message through it)
-void read_message(int newsockfd, char* buffer)
+void read_message(int socketfd, char* buffer)
 {
 	// make sure buffer is clear	
   bzero(buffer, BUFFER_SIZE);
 	/* read from the socket */
   int n;
-	n = read(newsockfd, buffer, BUFFER_SIZE);
+	n = read(socketfd, buffer, BUFFER_SIZE);
 	if (n < 0) 
 		printf("ERROR reading from socket");
 }
@@ -174,16 +175,16 @@ void read_message(int newsockfd, char* buffer)
 // checks if there is something in the socket
 // and puts it in the given buffer
 // (returns -1 if there was nothing there)
-int try_read_socket(int sockfd, char* buffer)
+int try_read_socket(int socketfd, char* buffer)
 {
   int status;
-  status = recv(sockfd, buffer, BUFFER_SIZE, 0) ;
+  status = recv(socketfd, buffer, BUFFER_SIZE, 0) ;
   return status;
 }
 
 int setup_socket(communication_params params)
 {
-  int sockfd;
+  int socketfd;
   struct hostent *server;
   struct sockaddr_in serv_addr;
 
@@ -193,7 +194,7 @@ int setup_socket(communication_params params)
     exit(0);
   }
     
-  if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
+  if ((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
     printf("ERROR opening socket\n");
     
   // assign ip and port to socket
@@ -203,13 +204,16 @@ int setup_socket(communication_params params)
 	bzero(&(serv_addr.sin_zero), 8);     
 	
   // connect client socket to server socket
-	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
+	if (connect(socketfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
     printf("ERROR connecting\n");
+
+  // change socket to non-blocking mode
+  fcntl(socketfd, F_SETFL, fcntl(socketfd, F_GETFL, 0) | O_NONBLOCK);
   
-  return sockfd;
+  return socketfd;
 }
 
-void send_connect_message(int sockfd, char* profile_name)
+void send_connect_message(int socketfd, char* profile_name)
 {
   char buffer[BUFFER_SIZE];
   char payload[PAYLOAD_SIZE];
@@ -218,11 +222,50 @@ void send_connect_message(int sockfd, char* profile_name)
   snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
   packet_to_send = create_packet(payload, 0);
   serialize_packet(packet_to_send, buffer);
-  write_message(sockfd, buffer);
+  write_message(socketfd, buffer);
 
   /* read ACK from the socket */
-  read_message(sockfd, buffer);
+  read_message(socketfd, buffer);
+  printf("DEBUG 1112");
+  sleep(1);
+fflush(stdout);
+
   printf("Received message: %s\n", buffer);
+  sleep(1);
+fflush(stdout);
+
+  printf("DEBUG 555");
+}
+
+void communication_loop(int socketfd)
+{
+    char buffer[BUFFER_SIZE];
+    char payload[PAYLOAD_SIZE];
+    packet packet;
+
+    printf("DEBUG communication_loop\n");
+    // se tem mensagem pra mandar, tira da fila to_send e manda
+    // sem_wait(&receive_full); // waits for the receive FIFO queue to be empty
+		// se tem mensagem recebida,  bota na fila received
+    bzero(buffer, BUFFER_SIZE);
+    int status = recv(socketfd, buffer, BUFFER_SIZE, 0);
+    if(status != -1)
+    {
+      printf("DEBUG status %d\n", status);
+    } else {
+      printf("DEBUG status %d", status);
+      printf(" and buffer: %s\n", buffer);
+    }
+
+
+    // sem_wait(&receive_empty); // waits for the receive FIFO queue to be empty
+		
+    // loop antigo:
+    // send_user_message(socketfd);
+    // // receive ACK
+    // read_message(socketfd, buffer_received);
+    // printf("Received from server: %s\n", buffer_received);
+
 }
 
 // function for the thread that deals with communication
@@ -231,30 +274,22 @@ void * communication_thread(void *arg) {
   // - fila de mensagens recebidas
   // - fila de mensagens a enviar 
 	communication_params params = *((communication_params *)arg);
-  int sockfd;
+  int socketfd;
 
   // print pthread id
 	pthread_t thread_id = pthread_self();
 	printf("Started thread %d\n", (int)thread_id);
 
-  sockfd = setup_socket(params);
+  socketfd = setup_socket(params);
+  send_connect_message(socketfd, params.profile_name);
 
-  send_connect_message(sockfd, params.profile_name);
-
+  printf("DEBUG 321");
 	while(1){
-    // se tem mensagem pra mandar, tira da fila to_send e manda
-    // se tem mensagem recebida, espera bota na fila received
-    //sem_wait(&receive_empty); // waits for the receive FIFO queue to be empty
-		
-    // loop antigo:
-    // send_user_message(sockfd);
-    // // receive ACK
-    // read_message(sockfd, buffer_received);
-    // printf("Received from server: %s\n", buffer_received);
+    communication_loop(socketfd);
   }
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
-	close(sockfd);
+	close(socketfd);
 	pthread_exit(NULL);
 }
 
@@ -267,10 +302,12 @@ void * interface_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Started thread %d\n", (int)thread_id);
 
-	while(1){
-    // TODO permitir usuario dizer MSG ou FOLLOW
-  }
+	// while(1){
+  //   // TODO permitir usuario dizer MSG ou FOLLOW
+  // }
+  sleep(1);
   
+	printf("Exiting threads %d\n", (int)thread_id);
   pthread_exit(NULL);
 }
 
@@ -280,6 +317,7 @@ int main(int argc, char*argv[])
   interface_params interface_parameters;
   pthread_t communication_tid, interface_tid;
 
+  // get arguments
   if (argc != 4) {
 		fprintf(stderr,"usage: %s <profile_name> <server_ip_address> <port>\n", argv[0]);
 		exit(0);
@@ -306,6 +344,7 @@ int main(int argc, char*argv[])
     exit(-1);
   }
 
+  // waits for both threads to end before exiting the program
   pthread_join(communication_tid, NULL);
   pthread_join(interface_tid, NULL);
 
