@@ -162,9 +162,15 @@ void * socket_thread(void *arg) {
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
 		packet_to_send = create_packet(payload, 4);
 		serialize_packet(packet_to_send, reply);
+<<<<<<< HEAD:Server/server_tcp.cpp
 		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
 		write_message(socket, reply);*/
   	}while (1);
+=======
+		printf("Thread %d - Sending ACK message: %s\n", (int)thread_id, reply);
+		write_message(socket, reply);
+  	}while (size != 0);
+>>>>>>> a2d06d0287c73e6e3c0913abc92601a93ff2832c:server_tcp.cpp
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	close(socket);
