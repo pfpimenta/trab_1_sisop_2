@@ -8,12 +8,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h> 
+#include <pthread.h>
 
 #define PORT 4000
 #define BUFFER_SIZE 256
-#define MESSAGE_SIZE 128
+#define PAYLOAD_SIZE 128
 
 int seqn = 0;
+
+typedef struct __communication_params{
+  char * profile_name;
+  char * server_ip_address;
+  int port;
+} communication_params;
+
+typedef struct __interface_params{
+  int messages_to_send; // TODO mudar tipo
+  int received_notifications; // TODO mudar tipo
+} interface_params;
 
 // TODO : put in another file
 typedef struct __packet{
@@ -116,11 +128,11 @@ int send_user_message(int sockfd)
 {
   packet packet_to_send;
   char buffer[BUFFER_SIZE];
-  char message[MESSAGE_SIZE];
+  char message[PAYLOAD_SIZE];
 
   printf("Please enter your message:");
   bzero(message, sizeof(message));  
-  fgets(message, MESSAGE_SIZE, stdin);
+  fgets(message, PAYLOAD_SIZE, stdin);
   message[strlen(message)-1] = 0; // remove '\n'
   packet_to_send = create_packet(message, 3);
   serialize_packet(packet_to_send, buffer);
@@ -157,24 +169,31 @@ void read_message(int newsockfd, char* buffer)
 		printf("ERROR reading from socket");
 }
 
-
-int main(int argc, char *argv[])
-{
+// function for the thread that deals with communication
+void * communication_thread(void *arg) {
+  // TODO pegar ponteiro pra
+  // - fila de mensagens recebidas
+  // - fila de mensagens a enviar 
+	communication_params params = *((communication_params *)arg);
   int sockfd, n;
-  int size = 0;
+
   struct sockaddr_in serv_addr;
   struct hostent *server;
   packet packet_to_send;
 
-  char buffer[BUFFER_SIZE];
-  char message[MESSAGE_SIZE];
+  char * profile_name;
+  char * server_ip_address;
+  int port;
 
-  if (argc < 2) {
-		fprintf(stderr,"usage: %s hostname\n", argv[0]);
-		exit(0);
-  }
-	
-	server = gethostbyname(argv[1]);
+  char buffer_to_send[BUFFER_SIZE];
+  char buffer_received[BUFFER_SIZE];
+  char payload[PAYLOAD_SIZE];
+
+  // print pthread id
+	pthread_t thread_id = pthread_self();
+	printf("Started thread %d\n", (int)thread_id);
+
+  server = gethostbyname(params.server_ip_address);
 	if (server == NULL) {
     fprintf(stderr,"ERROR, no such host\n");
     exit(0);
@@ -185,7 +204,7 @@ int main(int argc, char *argv[])
     
   // assign ip and port to socket
 	serv_addr.sin_family = AF_INET;     
-	serv_addr.sin_port = htons(PORT);    
+	serv_addr.sin_port = htons(params.port);    
 	serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
 	bzero(&(serv_addr.sin_zero), 8);     
 	
@@ -195,36 +214,86 @@ int main(int argc, char *argv[])
 
 
   //// send CONNECT message
-  printf("Please enter your username:");
-  bzero(message, sizeof(message));  
-  fgets(message, MESSAGE_SIZE, stdin);
-  message[strlen(message)-1] = 0; // remove '\n'
-  /* write buffer in the socket */
-  packet_to_send = create_packet(message, 0);
-  serialize_packet(packet_to_send, buffer);
-  write_message(sockfd, buffer);
-  /* read from the socket */
-  read_message(sockfd, buffer);
+  snprintf(payload, PAYLOAD_SIZE, "%s", params.profile_name);
+  packet_to_send = create_packet(payload, 0);
+  serialize_packet(packet_to_send, buffer_to_send);
+  write_message(sockfd, buffer_to_send);
+  /* read ACK from the socket */
+  read_message(sockfd, buffer_received);
+  printf("Received message: %s\n", buffer_received);
 
-  // TODO criar uma thread pra receber notificacoes
-  // TODO criar uma thread pra mandar packets
-  // // create thread for the new socket
-  // if (pthread_create(&tid[i], NULL, socket_thread, &newsockfd) != 0 ) {
-  //   printf("Failed to create thread\n");
-  //   exit(-1);
-  // }
-
-
-
-  ///////////////////////////////////
-  //// send MSG messages
-  while(1){
+	while(1){
+    // TODO check fila de mensagens a enviar
+    // TODO get mensagem a enviar
     send_user_message(sockfd);
 
-    read_message(sockfd, buffer);
-    printf("Received from server: %s\n",buffer);
- }
- 
+		// receive ACK
+    read_message(sockfd, buffer_received);
+    printf("Received from server: %s\n", buffer_received);
+  }
+
+	printf("Exiting socket thread: %d\n", (int)thread_id);
 	close(sockfd);
+	pthread_exit(NULL);
+}
+
+
+// function for the thread that deals with the user interface
+void * interface_thread(void *arg) {
+  // TODO pegar ponteiro pra
+  // - fila de mensagens recebidas
+  // - fila de mensagens a enviar 
+	interface_params params = *((interface_params *)arg);
+
+  // print pthread id
+	pthread_t thread_id = pthread_self();
+	printf("Started thread %d\n", (int)thread_id);
+  
+  pthread_exit(NULL);
+}
+
+int main(int argc, char *argv[])
+{
+  int sockfd, n;
+  int size = 0;
+  struct sockaddr_in serv_addr;
+  struct hostent *server;
+  packet packet_to_send;
+  communication_params communication_parameters;
+  interface_params interface_parameters;
+
+  char * profile_name;
+  char * server_ip_address;
+  int port;
+  
+  char buffer[BUFFER_SIZE];
+  char message[PAYLOAD_SIZE];
+
+  pthread_t communication_tid, interface_tid;
+
+  if (argc != 4) {
+		fprintf(stderr,"usage: %s <profile_name> <server_ip_address> <port>\n", argv[0]);
+		exit(0);
+  } else {
+    communication_parameters.profile_name = argv[1];
+    communication_parameters.server_ip_address = argv[2];
+    communication_parameters.port = atoi(argv[3]);
+  }
+	
+
+  // TODO criar uma thread pra receber notificacoes
+  if (pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters) != 0 ) {
+    printf("Failed to create thread\n");
+    exit(-1);
+  }
+  // TODO criar uma thread pra interface
+  if (pthread_create(&interface_tid, NULL, interface_thread, &interface_parameters) != 0 ) {
+    printf("Failed to create thread\n");
+    exit(-1);
+  }
+
+  pthread_join(communication_tid, NULL);
+  pthread_join(interface_tid, NULL);
+
   return 0;
 }

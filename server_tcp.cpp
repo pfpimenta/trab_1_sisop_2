@@ -152,7 +152,7 @@ void * socket_thread(void *arg) {
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
 		packet_to_send = create_packet(payload, 4);
 		serialize_packet(packet_to_send, reply);
-		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
+		printf("Thread %d - Sending ACK message: %s\n", (int)thread_id, reply);
 		write_message(socket, reply);
   	}while (size != 0);
 
