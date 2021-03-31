@@ -5,20 +5,39 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <string>
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
-
+#include <utility>
 
 #define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define MESSAGE_SIZE 128
 
+#define TYPE_CONNECT 0
+#define TYPE_FOLLOW 1
+#define TYPE_SEND 2
+#define TYPE_MSG 3
+#define TYPE_ACK 4
+#define TYPE_ERROR 5
+
 int seqn = 0;
 
-// TODO : put in another file
+
+//Global master table
+typedef struct master_table_fields {
+	char seguidores[50][25];
+	int seguidores_count;
+	//notificacoes_recebidas_t notificacoes_recebidas[1000];
+	//notificacoes_pendentes_t notificacoes_pendentes[1000];
+} master_table_fields;
+
+typedef std::pair<const std::string, master_table_fields> master_table;
+//---
+
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
         // 0 - CONNECT (username_to_login, seqn)
@@ -126,10 +145,14 @@ packet create_packet(char* message, int packet_type)
 void * socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int size = 0;
-	int reference_seqn;
+	int reference_seqn = 0;
 	char payload[MESSAGE_SIZE];
 	char client_message[BUFFER_SIZE];
 	char reply[BUFFER_SIZE];
+	char username[24];
+	int message_type = -1;
+	int payload_length = -1;
+	
 	packet packet_to_send;
 
 	// print pthread id
@@ -150,6 +173,42 @@ void * socket_thread(void *arg) {
 		if (size != -1) {
 			client_message[size] = '\0';
 			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+
+			char* token;
+			const char delimiter[2] = ",";
+
+			//seqn
+			token = strtok(client_message, delimiter);
+			reference_seqn = atoi(token);
+
+			//payload_length
+			token = strtok(NULL, delimiter);
+			payload_length = atoi(token);
+
+			//packet_type
+			token = strtok(NULL, delimiter);
+			message_type = atoi(token);
+
+			//payload (get whatever else is in there)
+			token = strtok(NULL, "");
+			strncpy(payload, token, payload_length);
+
+			printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
+			fflush(stdout);
+		}
+
+		switch (message_type) {
+			case TYPE_CONNECT:
+				break;
+
+ 			case TYPE_FOLLOW:
+			 	break;
+
+ 			case TYPE_SEND:
+			 	break;
+
+ 			case TYPE_MSG:
+			 	break;
 		}
 
 		// TODO : treat received message
@@ -162,15 +221,9 @@ void * socket_thread(void *arg) {
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
 		packet_to_send = create_packet(payload, 4);
 		serialize_packet(packet_to_send, reply);
-<<<<<<< HEAD:Server/server_tcp.cpp
 		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
 		write_message(socket, reply);*/
   	}while (1);
-=======
-		printf("Thread %d - Sending ACK message: %s\n", (int)thread_id, reply);
-		write_message(socket, reply);
-  	}while (size != 0);
->>>>>>> a2d06d0287c73e6e3c0913abc92601a93ff2832c:server_tcp.cpp
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	close(socket);
