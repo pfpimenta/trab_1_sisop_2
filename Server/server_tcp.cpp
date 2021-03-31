@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -11,7 +12,7 @@
 
 
 #define PORT 4000
-#define MAX_THREADS 15 // maximum number of threads allowed
+#define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define MESSAGE_SIZE 128
 
@@ -67,7 +68,7 @@ int setup_socket()
 	int sockfd;
     struct sockaddr_in serv_addr;
 
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
+	if ((sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1) 
 	{
         printf("ERROR opening socket");
         exit(-1);
@@ -121,7 +122,7 @@ packet create_packet(char* message, int packet_type)
 }
 
 
-// controls the client inputs received by socket
+// Thread designated for the connected client
 void * socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int size = 0;
@@ -135,26 +136,35 @@ void * socket_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Socket opened in thread %d\n", (int)thread_id);
 
+	int flags = fcntl(socket, F_GETFL, 0);
+	if (flags == -1) printf("FAILED getting socket flags.\n");
+	flags = flags | O_NONBLOCK;
+	if (fcntl(socket, F_SETFL, flags) != 0) printf("FAILED setting socket to NON-BLOCKING mode.\n");
+
+	// zero-fill the buffer
+	bzero(client_message, sizeof(client_message));
+
 	do{
 		// receive message
-  		bzero(client_message, sizeof(client_message));
-		size = recv(socket, client_message, BUFFER_SIZE, 0); 
-		client_message[size] = '\0';
-		printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+		size = recv(socket, client_message, BUFFER_SIZE, 0);
+		if (size != -1) {
+			client_message[size] = '\0';
+			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+		}
 
 		// TODO : treat received message
 		// usar strtok
 		// fazer um switch case
 
 		// send ACK
-		reference_seqn = 0; // TODO
+		/*reference_seqn = 0; // TODO
   		bzero(payload, sizeof(payload));
 		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
 		packet_to_send = create_packet(payload, 4);
 		serialize_packet(packet_to_send, reply);
 		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
-		write_message(socket, reply);
-  	}while (size != 0);
+		write_message(socket, reply);*/
+  	}while (1);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	close(socket);
@@ -163,8 +173,9 @@ void * socket_thread(void *arg) {
 
 int main(int argc, char *argv[])
 {
+	int i = 0;
 	int sockfd;
-	int newsockfd, n;
+	int newsockfd;
 	socklen_t clilen;
 	char buffer[BUFFER_SIZE];
   	char message[MESSAGE_SIZE];
@@ -172,22 +183,24 @@ int main(int argc, char *argv[])
 	packet packet_to_send;
   	pthread_t tid[MAX_THREADS];
 
-    // setup main socket
+    // setup LISTEN socket
     sockfd = setup_socket();
+	printf("LISTEN socket open and ready. \n");
+
+	clilen = sizeof(struct sockaddr_in);
 
 	// loop that accepts new connections and allocates threads to deal with them
-    int i = 0;
 	while(1) {
-		// accept new connection in a new socket
-		clilen = sizeof(struct sockaddr_in);
-		if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
-			printf("ERROR on accept");
-
-		// create thread for the new socket
-		if (pthread_create(&tid[i], NULL, socket_thread, &newsockfd) != 0 ) {
-			printf("Failed to create thread\n");
-			exit(-1);
+		
+		// If new incoming connection, accept. Then continue as normal.
+		if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
+			if (pthread_create(&tid[i], NULL, socket_thread, &newsockfd) != 0 ) {
+				printf("Failed to create thread\n");
+				exit(-1);
+			}	
 		}
+
+		sleep(1);
 
 		// TODO: codigo pra limitar o numero maximo de threads
 		// e fechar threads que ja terminaram
