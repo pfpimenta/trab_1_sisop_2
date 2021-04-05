@@ -226,15 +226,23 @@ void send_connect_message(int socketfd, char* profile_name)
 
   /* read ACK from the socket */
   read_message(socketfd, buffer);
-  printf("DEBUG 1112");
+  printf("DEBUG 1112 \n");
   sleep(1);
-fflush(stdout);
+  fflush(stdout);
 
   printf("Received message: %s\n", buffer);
   sleep(1);
-fflush(stdout);
+  fflush(stdout);
 
-  printf("DEBUG 555");
+  printf("DEBUG 555 \n");
+
+  sleep(3);
+
+  // Test a FOLLOW packet
+  snprintf(payload, PAYLOAD_SIZE, "%s", "andre");
+  packet_to_send = create_packet(payload, 1);
+  serialize_packet(packet_to_send, buffer);
+  write_message(socketfd, buffer);
 }
 
 void communication_loop(int socketfd)
@@ -266,6 +274,7 @@ void communication_loop(int socketfd)
     // read_message(socketfd, buffer_received);
     // printf("Received from server: %s\n", buffer_received);
 
+    sleep(1);
 }
 
 // function for the thread that deals with communication

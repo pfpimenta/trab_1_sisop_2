@@ -1,1 +1,1 @@
-gcc server_tcp.cpp -o server -lpthread
+g++ server_tcp.cpp -o server -lpthread

@@ -1,1 +1,1 @@
-gcc client_tcp.cpp -o client
+gcc client_tcp.cpp -o client -lpthread

@@ -11,6 +11,9 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <utility>
+#include <iostream>
+#include <map>
+#include <list>
 
 #define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
@@ -26,17 +29,35 @@
 
 int seqn = 0;
 
+//-- Master table --
+class Row {
+	protected:
+		std::list<std::string> Following;
 
-//Global master table
-typedef struct master_table_fields {
-	char seguidores[50][25];
-	int seguidores_count;
-	//notificacoes_recebidas_t notificacoes_recebidas[1000];
-	//notificacoes_pendentes_t notificacoes_pendentes[1000];
-} master_table_fields;
+	public:
+		Row(); //constructor
 
-typedef std::pair<const std::string, master_table_fields> master_table;
-//---
+		int getFollowingCount() {
+			return Following.size();
+		}
+
+		void setAddNewFollowing(std::string Username) {
+			this->Following.push_back( Username );
+			std::cout<<"Now following user: ";
+			std::cout<<Username;
+			std::cout<<"\n";
+			fflush(stdout);
+		}
+};
+
+Row::Row(void) {
+	std::cout << "Creating Row";
+}
+
+typedef std::map< std::string, Row*> master_table_t;
+
+master_table_t master_table; //Globally accessible master table instance
+//------------------
 
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
@@ -149,9 +170,9 @@ void * socket_thread(void *arg) {
 	char payload[MESSAGE_SIZE];
 	char client_message[BUFFER_SIZE];
 	char reply[BUFFER_SIZE];
-	char username[24];
 	int message_type = -1;
 	int payload_length = -1;
+	std::string CurrentUser;
 	
 	packet packet_to_send;
 
@@ -171,6 +192,8 @@ void * socket_thread(void *arg) {
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE, 0);
 		if (size != -1) {
+			bzero(payload, MESSAGE_SIZE); //clear payload buffer
+
 			client_message[size] = '\0';
 			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
 
@@ -195,25 +218,35 @@ void * socket_thread(void *arg) {
 
 			printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
 			fflush(stdout);
+
+			switch (message_type) {
+				case TYPE_CONNECT:
+				{
+					std::string Username(payload); //copying char array into proper std::string type
+					CurrentUser = Username;
+					master_table.insert( std::make_pair( Username, new Row() ) ); //will not insert if row already exists
+					break;
+				}
+				case TYPE_FOLLOW:
+				{
+					std::string Username(payload); //copying char array into proper std::string type
+					Row* CurrentRow = master_table.find(CurrentUser)->second;
+
+					CurrentRow->setAddNewFollowing( Username );
+
+					std::cout<<"\nFollowing count is: ";
+					int count = CurrentRow->getFollowingCount();
+					std::cout<<count;
+					std::cout<<"\n\n";
+					break;
+				}
+				case TYPE_SEND:
+					break;
+
+				case TYPE_MSG:
+					break;
+			}
 		}
-
-		switch (message_type) {
-			case TYPE_CONNECT:
-				break;
-
- 			case TYPE_FOLLOW:
-			 	break;
-
- 			case TYPE_SEND:
-			 	break;
-
- 			case TYPE_MSG:
-			 	break;
-		}
-
-		// TODO : treat received message
-		// usar strtok
-		// fazer um switch case
 
 		// send ACK
 		/*reference_seqn = 0; // TODO
