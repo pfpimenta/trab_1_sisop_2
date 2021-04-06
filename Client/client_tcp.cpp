@@ -226,6 +226,29 @@ void send_connect_message(int socketfd, char* profile_name)
 
   /* read ACK from the socket */
   read_message(socketfd, buffer);
+  sleep(1);
+  fflush(stdout);
+
+  printf("Received message: %s\n", buffer);
+  sleep(1);
+  fflush(stdout);
+
+  sleep(3);
+}
+
+void send_follow_message(int socketfd, char* profile_name)
+{
+  char buffer[BUFFER_SIZE];
+  char payload[PAYLOAD_SIZE];
+  packet packet_to_send;
+
+  snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
+  packet_to_send = create_packet(payload, 1);
+  serialize_packet(packet_to_send, buffer);
+  write_message(socketfd, buffer);
+
+  /* read ACK from the socket */
+  read_message(socketfd, buffer);
   printf("DEBUG 1112 \n");
   sleep(1);
   fflush(stdout);
@@ -237,13 +260,9 @@ void send_connect_message(int socketfd, char* profile_name)
   printf("DEBUG 555 \n");
 
   sleep(3);
-
-  // Test a FOLLOW packet
-  snprintf(payload, PAYLOAD_SIZE, "%s", "andre");
-  packet_to_send = create_packet(payload, 1);
-  serialize_packet(packet_to_send, buffer);
-  write_message(socketfd, buffer);
 }
+
+
 
 void communication_loop(int socketfd)
 {
@@ -292,7 +311,11 @@ void * communication_thread(void *arg) {
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
 
-  printf("DEBUG 321");
+  // Test a FOLLOW packet
+  char name[99] = "andre";
+  char* follow_name = &name[0];
+  send_follow_message(socketfd, follow_name);
+
 	while(1){
     communication_loop(socketfd);
   }

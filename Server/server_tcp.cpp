@@ -18,7 +18,7 @@
 #define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
-#define MESSAGE_SIZE 128
+#define PAYLOAD_SIZE 128
 
 #define TYPE_CONNECT 0
 #define TYPE_FOLLOW 1
@@ -31,8 +31,13 @@ int seqn = 0;
 
 //-- Master table --
 class Row {
+	// a row corresponds to a user
+
 	protected:
-		std::list<std::string> Following;
+		std::list<std::string> Following; // TODO talvez tirar a lista Following
+		std::list<std::string> followers;
+		std::list<std::string> messages_to_receive;
+		std::list<std::string> messages_sent;
 
 	public:
 		Row(); //constructor
@@ -41,12 +46,53 @@ class Row {
 			return Following.size();
 		}
 
+		std::list<std::string> getFollowers() {
+			return this->followers;
+		}
+
 		void setAddNewFollowing(std::string Username) {
 			this->Following.push_back( Username );
+			// TODO checar se existe o username antes de inserir
 			std::cout<<"Now following user: ";
 			std::cout<<Username;
 			std::cout<<"\n";
 			fflush(stdout);
+		}
+
+		void setAddNewFollower(std::string username) {
+			this->followers.push_back( username );
+			// TODO checar se existe o username antes de inserir
+			std::cout<<"DEBUG new follower: ";
+			std::cout<<username;
+			std::cout<<"\n";
+			fflush(stdout);
+		}
+
+		void addNotification(std::string username, std::string message){
+			// first, generate payload string
+			std::string payload = "@" + username + " " + message;
+			
+			// put payload in list
+			messages_to_receive.push_back(payload);
+
+			std::cout << "DEBUG new notification: " << username << "\n";
+		}
+
+		// returns True if there is a notification
+		bool hasNewNotification(){
+			if(!this->messages_to_receive.empty())
+			{
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		// if there is a notification, removes it from the list and return it
+		std::string getNotification(){
+			std::string notification = this->messages_to_receive.front();
+			this->messages_to_receive.pop_front();
+			return notification;
 		}
 };
 
@@ -167,12 +213,14 @@ void * socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int size = 0;
 	int reference_seqn = 0;
-	char payload[MESSAGE_SIZE];
+	char payload[PAYLOAD_SIZE];
 	char client_message[BUFFER_SIZE];
-	char reply[BUFFER_SIZE];
+	char buffer[BUFFER_SIZE];
 	int message_type = -1;
 	int payload_length = -1;
-	std::string CurrentUser;
+	std::string CurrentUser = "not-connected";
+
+	std::string notification;
 	
 	packet packet_to_send;
 
@@ -192,7 +240,7 @@ void * socket_thread(void *arg) {
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE, 0);
 		if (size != -1) {
-			bzero(payload, MESSAGE_SIZE); //clear payload buffer
+			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 
 			client_message[size] = '\0';
 			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
@@ -229,10 +277,13 @@ void * socket_thread(void *arg) {
 				}
 				case TYPE_FOLLOW:
 				{
-					std::string Username(payload); //copying char array into proper std::string type
+					std::string newFollowerUsername(payload); //copying char array into proper std::string type
 					Row* CurrentRow = master_table.find(CurrentUser)->second;
+					Row* followerRow = master_table.find(newFollowerUsername)->second;
 
-					CurrentRow->setAddNewFollowing( Username );
+					// TODO talvez tirar a lista following
+					CurrentRow->setAddNewFollowing(newFollowerUsername);
+					followerRow->setAddNewFollower(CurrentUser);
 
 					std::cout<<"\nFollowing count is: ";
 					int count = CurrentRow->getFollowingCount();
@@ -241,21 +292,57 @@ void * socket_thread(void *arg) {
 					break;
 				}
 				case TYPE_SEND:
+				{
+					Row* currentRow = master_table.find(CurrentUser)->second;
+					std::string message(payload); //copying char array into proper std::string type
+					std::list<std::string> followers = currentRow->getFollowers();
+					for (std::string follower : followers){
+						Row* followerRow = master_table.find(follower)->second;
+						followerRow->addNotification(CurrentUser, message);
+					}
 					break;
-
-				case TYPE_MSG:
-					break;
+				}
 			}
+			// send ACK
+			/*reference_seqn = 0; // TODO
+	  		bzero(payload, sizeof(payload));
+			snprintf(payload, PAYLOAD_SIZE, "%d", reference_seqn);
+			packet_to_send = create_packet(payload, 4);
+			serialize_packet(packet_to_send, reply);
+			printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
+			write_message(socket, reply);*/
 		}
 
-		// send ACK
-		/*reference_seqn = 0; // TODO
-  		bzero(payload, sizeof(payload));
-		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
-		packet_to_send = create_packet(payload, 4);
-		serialize_packet(packet_to_send, reply);
-		printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
-		write_message(socket, reply);*/
+
+		// send message, if there is any
+		if(CurrentUser != "not-connected") // if the user has already connected
+		{
+			Row* currentRow = master_table.find(CurrentUser)->second;
+			// TODO : send to all client sessions, if there are more than 1
+			
+			if(currentRow->hasNewNotification())
+			{
+				notification = currentRow->getNotification();
+				// snprintf(payload, PAYLOAD_SIZE, "%s", notification);
+				strcpy(payload, notification.c_str());
+				packet_to_send = create_packet(payload, 0);
+				serialize_packet(packet_to_send, buffer);
+				write_message(socket, buffer);
+
+				// TODO receive ACK
+			}
+
+			// notification = currentRow->getNotification();
+			// if(notification != NULL){ // if there is a notification
+			// 	// send
+			// 	snprintf(payload, PAYLOAD_SIZE, "%s", notification);
+			// 	packet_to_send = create_packet(payload, 0);
+			// 	serialize_packet(packet_to_send, buffer);
+			// 	write_message(socket, buffer);
+
+			// 	// TODO receive ACK
+			// }
+		}
   	}while (1);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
@@ -270,7 +357,7 @@ int main(int argc, char *argv[])
 	int newsockfd;
 	socklen_t clilen;
 	char buffer[BUFFER_SIZE];
-  	char message[MESSAGE_SIZE];
+  	char message[PAYLOAD_SIZE];
 	struct sockaddr_in serv_addr, cli_addr;
 	packet packet_to_send;
   	pthread_t tid[MAX_THREADS];
