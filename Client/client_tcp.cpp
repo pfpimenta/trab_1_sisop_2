@@ -125,6 +125,46 @@ packet create_packet(char* message, int packet_type)
   return packet_to_send;
 }
 
+void print_packet(packet packet)
+{
+  printf("Reference seqn: %i \n", packet.seqn);
+  printf("Payload length: %i \n", packet.length);
+  printf("Packet type: %i \n", packet.type);
+  printf("Payload: %s \n", packet._payload);
+  fflush(stdout);
+}
+
+packet buffer_to_packet(char* buffer){
+  packet packet;
+  char payload[PAYLOAD_SIZE];
+
+  int buffer_size = strlen(buffer);
+  buffer[buffer_size] = '\0';
+
+  char* token;
+  const char delimiter[2] = ",";
+
+  //seqn
+  token = strtok(buffer, delimiter);
+  packet.seqn = atoi(token);
+
+  //payload_length
+  token = strtok(NULL, delimiter);
+  packet.length = atoi(token);
+
+  //packet_type
+  token = strtok(NULL, delimiter);
+  packet.type = atoi(token);
+
+  //payload (get whatever else is in there)
+  bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+  token = strtok(NULL, "");
+  strncpy(payload, token, packet.length);
+  packet._payload = payload;
+
+  return packet;
+}
+
 // serializes the packet and puts it in the buffer
 void serialize_packet(packet packet_to_send, char* buffer)
 {
@@ -232,14 +272,14 @@ void send_connect_message(int socketfd, char* profile_name)
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
 
-  /* read ACK from the socket */
-  read_message(socketfd, buffer);
-  sleep(1);
-  fflush(stdout);
+  // /* read ACK from the socket */
+  // read_message(socketfd, buffer);
+  // sleep(1);
+  // fflush(stdout);
 
-  printf("Received message: %s\n", buffer);
-  sleep(1);
-  fflush(stdout);
+  // printf("Received message: %s\n", buffer);
+  // sleep(1);
+  // fflush(stdout);
 
   sleep(3);
 }
@@ -255,16 +295,14 @@ void send_follow_message(int socketfd, char* profile_name)
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
 
-  /* read ACK from the socket */
-  read_message(socketfd, buffer);
-  sleep(1);
-  fflush(stdout);
+  // /* read ACK from the socket */
+  // read_message(socketfd, buffer);
+  // sleep(1);
+  // fflush(stdout);
 
-  printf("Received message: %s\n", buffer);
-  sleep(1);
-  fflush(stdout);
-
-  sleep(3);
+  // printf("Received message: %s\n", buffer);
+  // sleep(1);
+  // fflush(stdout);
 }
 
 
@@ -282,8 +320,11 @@ void communication_loop(int socketfd)
     if(size > 0) //(size != -1)
     {
       printf("\nMessage received: '%s' - size: %d\n", buffer, size);
-      // TODO put the message in a packet
-      // TODO put the packet in the received FIFO
+      //put the message in a packet
+      packet = buffer_to_packet(buffer);
+      print_packet(packet); // DEBUG
+      // put the packet in the received FIFO
+      packets_received_fifo.push_back(packet);
     } else {
       // nothing to read from the socket
     }
@@ -291,7 +332,7 @@ void communication_loop(int socketfd)
     // send packet to server, if there is any
     if(!packets_to_send_fifo.empty())
 		{
-      printf("DEBUG there is a packet to send!\n");
+      // printf("DEBUG there is a packet to send!\n");
       // get the packet
       packet = packets_to_send_fifo.front();
 			packets_to_send_fifo.pop_front();
@@ -299,8 +340,6 @@ void communication_loop(int socketfd)
       // serialize and send the packet
       serialize_packet(packet, buffer);
       write_message(socketfd, buffer);
-
-      printf("DEBUG sent: \n");
     }
     sleep(1);
 }
@@ -343,6 +382,7 @@ void * interface_thread(void *arg) {
   char user_input[PAYLOAD_SIZE];
   char string_to_parse[PAYLOAD_SIZE];
   packet packet_to_send;
+  packet packet_received;
 
   char* parse_ptr;
   char* tail_ptr;
@@ -374,11 +414,11 @@ void * interface_thread(void *arg) {
       
       // put the packet in the FIFO queue
       packets_to_send_fifo.push_back(packet_to_send);
-    } else if (strcmp(parse_ptr, "MSG") == 0) {
+    } else if (strcmp(parse_ptr, "SEND") == 0) {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
       tail_ptr = &user_input[4]; // get message
 
-      printf("DEBUG MSG - payload: '%s'\n", tail_ptr);
+      printf("DEBUG SEND - payload: '%s'\n", tail_ptr);
 
       // put the message in a packet
       bzero(payload, sizeof(payload));
@@ -388,13 +428,22 @@ void * interface_thread(void *arg) {
       // put the packet in the FIFO queue
       packets_to_send_fifo.push_back(packet_to_send);
 
-    } else if (strcmp(parse_ptr, "NOTIFICATIONS") == 0) {
-      // TODO printar todas notificacoes recebidas acumuladas
+    } else if (strcmp(parse_ptr, "NOTIFICATIONS") == 0) {  
+      printf("\n");
+      // prints received packets, if any
+      while(!packets_received_fifo.empty())
+      {
+        // get the packet
+        packet_received = packets_received_fifo.front();
+        packets_received_fifo.pop_front();
+
+        // print notification
+        printf("Notification: %s\n", packet_received._payload);
+      }
+
     } else {
       printf("ERROR: did not recognize command: %s\n", parse_ptr);
     }
-
-    printf("DEBUG to_send: %s\n", buffer);
   }
   sleep(1);
   
