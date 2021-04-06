@@ -11,13 +11,14 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <list>
 
 #define PORT 4000
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
 int seqn = 0;
-sem_t send_empty, send_full, receive_empty, receive_full;
+sem_t is_empty, is_full;
 
 typedef struct __communication_params{
   char* profile_name;
@@ -43,6 +44,12 @@ typedef struct __packet{
     uint16_t length; // Comprimento do payload
     const char* _payload; // Dados da mensagem
 } packet;
+
+
+// TODO put somewhere else
+std::list<packet> packets_to_send_fifo;
+std::list<packet> packets_received_fifo;
+
 
 const char* get_packet_type_string(int packet_type)
 {
@@ -102,7 +109,7 @@ int get_packet_type(char* packet_type_string)
   }
   else
   {
-		printf("ERROR: unkown packet type");
+		printf("ERROR: unkown packet type\n");
     exit(0);
   }
 }
@@ -133,7 +140,7 @@ int send_user_message(int socketfd)
   char buffer[BUFFER_SIZE];
   char message[PAYLOAD_SIZE];
 
-  printf("Please enter your message:");
+  printf("\nPlease enter your message:");
   bzero(message, sizeof(message));  
   fgets(message, PAYLOAD_SIZE, stdin);
   message[strlen(message)-1] = 0; // remove '\n'
@@ -157,7 +164,7 @@ void write_message(int socketfd, char* message)
     int n;
 	n = write(socketfd, message, strlen(message));
 	if (n < 0) 
-		printf("ERROR writing to socket");
+		printf("ERROR writing to socket\n");
 }
 
 // reads a message from a socket (receives a message through it)
@@ -169,7 +176,7 @@ void read_message(int socketfd, char* buffer)
   int n;
 	n = read(socketfd, buffer, BUFFER_SIZE);
 	if (n < 0) 
-		printf("ERROR reading from socket");
+		printf("ERROR reading from socket\n");
 }
 
 // checks if there is something in the socket
@@ -219,6 +226,7 @@ void send_connect_message(int socketfd, char* profile_name)
   char payload[PAYLOAD_SIZE];
   packet packet_to_send;
 
+  // send CONNECT message
   snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
   packet_to_send = create_packet(payload, 0);
   serialize_packet(packet_to_send, buffer);
@@ -226,15 +234,20 @@ void send_connect_message(int socketfd, char* profile_name)
 
   /* read ACK from the socket */
   read_message(socketfd, buffer);
-  printf("DEBUG 1112");
   sleep(1);
-fflush(stdout);
-
+  fflush(stdout);
   printf("Received message: %s\n", buffer);
   sleep(1);
-fflush(stdout);
+  fflush(stdout);
+}
 
-  printf("DEBUG 555");
+// put i
+int put_packet_in_send_queue(packet packet_to_send)
+{
+  sem_wait(&is_empty);
+  // TODO
+  sem_post(&is_empty);
+  return 0; // TODO
 }
 
 void communication_loop(int socketfd)
@@ -243,36 +256,39 @@ void communication_loop(int socketfd)
     char payload[PAYLOAD_SIZE];
     packet packet;
 
-    printf("DEBUG communication_loop\n");
-    // se tem mensagem pra mandar, tira da fila to_send e manda
-    // sem_wait(&receive_full); // waits for the receive FIFO queue to be empty
-		// se tem mensagem recebida,  bota na fila received
+    // printf("DEBUG communication_loop\n");
+		// se tem mensagem recebida, prints it to the client
     bzero(buffer, BUFFER_SIZE);
-    int status = recv(socketfd, buffer, BUFFER_SIZE, 0);
-    if(status != -1)
+    int size = recv(socketfd, buffer, BUFFER_SIZE, 0);
+    if(size > 0) //(size != -1)
     {
-      printf("DEBUG status %d\n", status);
+      printf("\nMessage received: '%s' - size: %d\n", buffer, size);
+      // TODO put the message in a packet
+      // TODO put the packet in the received FIFO
     } else {
-      printf("DEBUG status %d", status);
-      printf(" and buffer: %s\n", buffer);
+      // nothing to read from the socket
     }
 
+    // send packet to server, if there is any
+    if(!packets_to_send_fifo.empty())
+		{
+      printf("DEBUG there is a packet to send!\n");
+      // get the packet
+      packet = packets_to_send_fifo.front();
+			packets_to_send_fifo.pop_front();
 
-    // sem_wait(&receive_empty); // waits for the receive FIFO queue to be empty
-		
-    // loop antigo:
-    // send_user_message(socketfd);
-    // // receive ACK
-    // read_message(socketfd, buffer_received);
-    // printf("Received from server: %s\n", buffer_received);
+      // serialize and send the packet
+      serialize_packet(packet, buffer);
+      write_message(socketfd, buffer);
 
+      printf("DEBUG sent: \n");
+    }
 }
 
-// function for the thread that deals with communication
+// function for the thread that
+// - receives notifications from the server, then prints them
+// - gets packets to_send from the FIFO and send it to the server
 void * communication_thread(void *arg) {
-  // TODO pegar ponteiro pra
-  // - fila de mensagens recebidas
-  // - fila de mensagens a enviar 
 	communication_params params = *((communication_params *)arg);
   int socketfd;
 
@@ -283,7 +299,6 @@ void * communication_thread(void *arg) {
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
 
-  printf("DEBUG 321");
 	while(1){
     communication_loop(socketfd);
   }
@@ -294,17 +309,68 @@ void * communication_thread(void *arg) {
 }
 
 
-// function for the thread that deals with the user interface
+// function for the thread that gets user input
+// and puts it in the to_send FIFO queue
 void * interface_thread(void *arg) {
 	interface_params params = *((interface_params *)arg);
+  char buffer[BUFFER_SIZE];
+  char payload[PAYLOAD_SIZE];
+  char user_input[PAYLOAD_SIZE];
+  char string_to_parse[PAYLOAD_SIZE];
+  packet packet_to_send;
+
+  char* parse_ptr;
+  char* tail_ptr;
+	char delim[] = " ";
 
   // print pthread id
 	pthread_t thread_id = pthread_self();
 	printf("Started thread %d\n", (int)thread_id);
 
-	// while(1){
-  //   // TODO permitir usuario dizer MSG ou FOLLOW
-  // }
+  while(1){
+    printf("Please enter your message:");
+    bzero(user_input, PAYLOAD_SIZE);  
+    fgets(user_input, PAYLOAD_SIZE, stdin);
+
+    // parse user input
+    strcpy(string_to_parse, user_input);
+	  parse_ptr = strtok(string_to_parse, delim);
+    if (strcmp(parse_ptr, "FOLLOW") == 0) 
+    {
+      user_input[strlen(user_input)-1] = 0; // remove '\n'
+      tail_ptr = &user_input[7]; // get username
+
+      printf("DEBUG FOLLOW - payload: '%s'\n", tail_ptr);
+
+      // put the message in a packet
+      bzero(payload, sizeof(payload));
+      snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+      packet_to_send = create_packet(payload, 1);
+      
+      // put the packet in the FIFO queue
+      packets_to_send_fifo.push_back(packet_to_send);
+    } else if (strcmp(parse_ptr, "MSG") == 0) {
+      user_input[strlen(user_input)-1] = 0; // remove '\n'
+      tail_ptr = &user_input[4]; // get message
+
+      printf("DEBUG MSG - payload: '%s'\n", tail_ptr);
+
+      // put the message in a packet
+      bzero(payload, sizeof(payload));
+      snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+      packet_to_send = create_packet(payload, 2);
+      
+      // put the packet in the FIFO queue
+      packets_to_send_fifo.push_back(packet_to_send);
+
+    } else if (strcmp(parse_ptr, "NOTIFICATIONS") == 0) {
+      // TODO printar todas notificacoes recebidas acumuladas
+    } else {
+      printf("ERROR: did not recognize command: %s\n", parse_ptr);
+    }
+
+    printf("DEBUG to_send: %s\n", buffer);
+  }
   sleep(1);
   
 	printf("Exiting threads %d\n", (int)thread_id);
@@ -328,12 +394,10 @@ int main(int argc, char*argv[])
   }
 
   // initialize semaphore variables
-  sem_init(&send_empty, 1, 1);
-  sem_init(&send_full, 1, 0);
-  sem_init(&receive_empty, 1, 1);
-  sem_init(&receive_full, 1, 0);
-
-  // create thread for communication with the server
+  sem_init(&is_empty, 1, 1);
+  sem_init(&is_full, 1, 1);
+  
+  // create thread for receiving server packets
   if (pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters) != 0 ) {
     printf("Failed to create thread\n");
     exit(-1);

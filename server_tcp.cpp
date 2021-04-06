@@ -9,7 +9,6 @@
 #include <netinet/in.h>
 #include <pthread.h>
 
-
 #define PORT 4000
 #define MAX_THREADS 15 // maximum number of threads allowed
 #define BUFFER_SIZE 256
@@ -135,6 +134,13 @@ void * socket_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Socket opened in thread %d\n", (int)thread_id);
 
+	// DEBUG
+	// receive message
+	bzero(client_message, sizeof(client_message));
+	size = recv(socket, client_message, BUFFER_SIZE, 0); 
+	client_message[size] = '\0';
+	printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+
 	do{
 		// receive message
   		bzero(client_message, sizeof(client_message));
@@ -146,14 +152,17 @@ void * socket_thread(void *arg) {
 		// usar strtok
 		// fazer um switch case
 
-		// send ACK
-		reference_seqn = 0; // TODO
-  		bzero(payload, sizeof(payload));
-		snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
-		packet_to_send = create_packet(payload, 4);
-		serialize_packet(packet_to_send, reply);
-		printf("Thread %d - Sending ACK message: %s\n", (int)thread_id, reply);
-		write_message(socket, reply);
+		// // send ACK
+		// reference_seqn = 0; // TODO
+  		// bzero(payload, sizeof(payload));
+		// snprintf(payload, MESSAGE_SIZE, "%d", reference_seqn);
+		// packet_to_send = create_packet(payload, 4);
+		// serialize_packet(packet_to_send, reply);
+		// printf("Thread %d - Sending ACK message: %s\n", (int)thread_id, reply);
+		// write_message(socket, reply);
+		
+		sleep(10); // DEBUG
+
   	}while (size != 0);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
