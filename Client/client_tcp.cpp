@@ -236,19 +236,38 @@ void send_connect_message(int socketfd, char* profile_name)
   read_message(socketfd, buffer);
   sleep(1);
   fflush(stdout);
+
   printf("Received message: %s\n", buffer);
   sleep(1);
   fflush(stdout);
+
+  sleep(3);
 }
 
-// put i
-int put_packet_in_send_queue(packet packet_to_send)
+void send_follow_message(int socketfd, char* profile_name)
 {
-  sem_wait(&is_empty);
-  // TODO
-  sem_post(&is_empty);
-  return 0; // TODO
+  char buffer[BUFFER_SIZE];
+  char payload[PAYLOAD_SIZE];
+  packet packet_to_send;
+
+  snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
+  packet_to_send = create_packet(payload, 1);
+  serialize_packet(packet_to_send, buffer);
+  write_message(socketfd, buffer);
+
+  /* read ACK from the socket */
+  read_message(socketfd, buffer);
+  sleep(1);
+  fflush(stdout);
+
+  printf("Received message: %s\n", buffer);
+  sleep(1);
+  fflush(stdout);
+
+  sleep(3);
 }
+
+
 
 void communication_loop(int socketfd)
 {
@@ -283,6 +302,7 @@ void communication_loop(int socketfd)
 
       printf("DEBUG sent: \n");
     }
+    sleep(1);
 }
 
 // function for the thread that
@@ -298,6 +318,11 @@ void * communication_thread(void *arg) {
 
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
+
+  // Test a FOLLOW packet
+  char name[99] = "usuario_teste";
+  char* follow_name = &name[0];
+  send_follow_message(socketfd, follow_name);
 
 	while(1){
     communication_loop(socketfd);
