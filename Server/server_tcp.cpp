@@ -34,7 +34,6 @@ class Row {
 	// a row corresponds to a user
 
 	protected:
-		std::list<std::string> Following; // TODO talvez tirar a lista Following
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
 		std::list<std::string> messages_sent;
@@ -42,21 +41,8 @@ class Row {
 	public:
 		Row(); //constructor
 
-		int getFollowingCount() {
-			return Following.size();
-		}
-
-		std::list<std::string> getFollowers() {
+		std::list<std::string> getFollowersList() {
 			return this->followers;
-		}
-
-		void setAddNewFollowing(std::string Username) {
-			this->Following.push_back( Username );
-			// TODO checar se existe o username antes de inserir
-			std::cout<<"Now following user: ";
-			std::cout<<Username;
-			std::cout<<"\n";
-			fflush(stdout);
 		}
 
 		void setAddNewFollower(std::string username) {
@@ -68,9 +54,9 @@ class Row {
 			fflush(stdout);
 		}
 
-		void addNotification(std::string username, std::string message){
+		void addNotification(std::string username, std::string message) {
 			// first, generate payload string
-			std::string payload = "@" + username + " " + message;
+			std::string payload = "@" + username + ": " + message;
 			
 			// put payload in list
 			messages_to_receive.push_back(payload);
@@ -80,8 +66,7 @@ class Row {
 
 		// returns True if there is a notification
 		bool hasNewNotification(){
-			if(!this->messages_to_receive.empty())
-			{
+			if(!this->messages_to_receive.empty()) {
 				return true;
 			} else {
 				return false;
@@ -89,16 +74,12 @@ class Row {
 		}
 
 		// if there is a notification, removes it from the list and return it
-		std::string getNotification(){
+		std::string getNotification() {
 			std::string notification = this->messages_to_receive.front();
 			this->messages_to_receive.pop_front();
 			return notification;
 		}
 };
-
-Row::Row(void) {
-	std::cout << "Creating Row";
-}
 
 typedef std::map< std::string, Row*> master_table_t;
 
@@ -272,23 +253,17 @@ void * socket_thread(void *arg) {
 				{
 					std::string Username(payload); //copying char array into proper std::string type
 					CurrentUser = Username;
-					master_table.insert( std::make_pair( Username, new Row() ) ); //will not insert if row already exists
+					master_table.insert( std::make_pair( Username, new Row() ) ); //TODO: check if map already has the username in there before inserting
 					break;
 				}
 				case TYPE_FOLLOW:
 				{
 					std::string newFollowerUsername(payload); //copying char array into proper std::string type
 					Row* CurrentRow = master_table.find(CurrentUser)->second;
-					Row* followerRow = master_table.find(newFollowerUsername)->second;
+					Row* followerRow = master_table.find(newFollowerUsername)->second;//TODO: segfault porque não validamos se esse usuário existe
 
-					// TODO talvez tirar a lista following
-					CurrentRow->setAddNewFollowing(newFollowerUsername);
 					followerRow->setAddNewFollower(CurrentUser);
 
-					std::cout<<"\nFollowing count is: ";
-					int count = CurrentRow->getFollowingCount();
-					std::cout<<count;
-					std::cout<<"\n\n";
 					break;
 				}
 				case TYPE_SEND:
