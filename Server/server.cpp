@@ -222,22 +222,23 @@ void * socket_thread(void *arg) {
 			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
 
 			char* token;
+  			char* rest = client_message;
 			const char delimiter[2] = ",";
 
 			//seqn
-			token = strtok(client_message, delimiter);
+			token = strtok_r(rest, delimiter, &rest);
 			reference_seqn = atoi(token);
 
 			//payload_length
-			token = strtok(NULL, delimiter);
+			token = strtok_r(rest, delimiter, &rest);
 			payload_length = atoi(token);
 
 			//packet_type
-			token = strtok(NULL, delimiter);
+			token = strtok_r(rest, delimiter, &rest);
 			message_type = atoi(token);
 
 			//payload (get whatever else is in there)
-			token = strtok(NULL, "");
+			token = strtok_r(rest, "", &rest);
 			strncpy(payload, token, payload_length);
 
 			printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
@@ -265,6 +266,7 @@ void * socket_thread(void *arg) {
 					} else {
 						printf("ERROR: user does not exist!\n");
 						fflush(stdout);
+						// TODO return ERROR packet to client
 					}
 					break;
 				}

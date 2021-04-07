@@ -144,23 +144,26 @@ packet buffer_to_packet(char* buffer){
 
   char* token;
   const char delimiter[2] = ",";
+  char* rest = buffer;
+
 
   //seqn
-  token = strtok(buffer, delimiter);
+  token = strtok_r(rest, delimiter, &rest);
   packet.seqn = atoi(token);
 
   //payload_length
-  token = strtok(NULL, delimiter);
+  token = strtok_r(rest, delimiter, &rest);
   packet.length = atoi(token);
 
   //packet_type
-  token = strtok(NULL, delimiter);
+  token = strtok_r(rest, delimiter, &rest);
   packet.type = atoi(token);
 
   //payload (get whatever else is in there)
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
-  token = strtok(NULL, "");
+  token = strtok_r(rest, "", &rest);
   strncpy(payload, token, packet.length+1);
+  payload[packet.length+1] = '\0';
   packet._payload = (char*) malloc(packet.length * sizeof(char));
   memcpy(packet._payload, payload, packet.length * sizeof(char));
 
@@ -329,14 +332,11 @@ void communication_loop(int socketfd)
     int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
     if(size > 0) //(size != -1)
     {
-      // printf("\nDEBUG Message received: '%s' - size: %d\n", buffer, size);
       //put the message in a packet
       packet = buffer_to_packet(buffer);
-      print_packet(packet); // DEBUG
+      //print_packet(packet); // DEBUG
       // put the packet in the received FIFO
       packets_received_fifo.push_back(packet);
-    } else {
-      // nothing to read from the socket
     }
 
     // send packet to server, if there is any
@@ -392,6 +392,7 @@ void * interface_thread(void *arg) {
   packet packet_received;
 
   char* parse_ptr;
+  char* rest;
   char* tail_ptr;
 	char delim[3] = " ";
   int num_notifications;
@@ -408,9 +409,10 @@ void * interface_thread(void *arg) {
     fgets(user_input, PAYLOAD_SIZE, stdin);
 
     // parse user input
+    rest = string_to_parse;
     strcpy(string_to_parse, user_input);
     printf("DEBUG string_to_parse: %s", string_to_parse);
-	  parse_ptr = strtok(string_to_parse, delim);
+	  parse_ptr = strtok_r(string_to_parse, delim, &rest);
     if (strcmp(parse_ptr, "FOLLOW") == 0) 
     {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
@@ -451,6 +453,7 @@ void * interface_thread(void *arg) {
 
         // print notification
         printf("Notification: %s\n", packet_received._payload);
+        printf("Notification: %ld\n", strlen(packet_received._payload));
         
         // free malloc
         free(packet_received._payload);
