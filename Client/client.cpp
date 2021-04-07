@@ -47,6 +47,7 @@ typedef struct __packet{
 
 
 // TODO put somewhere else
+// TODO Mutex
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
 
