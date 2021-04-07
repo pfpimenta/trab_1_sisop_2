@@ -96,16 +96,9 @@ typedef struct __packet{
         // 5 - ERROR (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
-    const char* _payload; // Dados da mensagem
+    char* _payload; // Dados da mensagem
 } packet;
 
-typedef struct __notification{
-    uint32_t id; // Identificador da notificação (sugere-se um identificador único)
-    uint32_t timestamp; // Timestamp da notificação
-    const char* _string; // Mensagem
-    uint16_t length; // Tamanho da mensagem
-    uint16_t pending; // Quantidade de leitores pendentes
-} notification;
 
 // reads a message from a socket (receives a message through it)
 void read_message(int newsockfd, char* buffer)
@@ -221,7 +214,7 @@ void * socket_thread(void *arg) {
 
 	do{
 		// receive message
-		size = recv(socket, client_message, BUFFER_SIZE, 0);
+		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
 		if (size != -1) {
 			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 

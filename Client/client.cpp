@@ -42,7 +42,7 @@ typedef struct __packet{
         // 5 - ERROR (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
-    const char* _payload; // Dados da mensagem
+    char* _payload; // Dados da mensagem
 } packet;
 
 
@@ -160,8 +160,9 @@ packet buffer_to_packet(char* buffer){
   //payload (get whatever else is in there)
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
   token = strtok(NULL, "");
-  strncpy(payload, token, packet.length);
-  packet._payload = payload;
+  strncpy(payload, token, packet.length+1);
+  packet._payload = (char*) malloc(packet.length * sizeof(char));
+  memcpy(packet._payload, payload, packet.length * sizeof(char));
 
   return packet;
 }
@@ -226,7 +227,7 @@ void read_message(int socketfd, char* buffer)
 int try_read_socket(int socketfd, char* buffer)
 {
   int status;
-  status = recv(socketfd, buffer, BUFFER_SIZE, 0) ;
+  status = recv(socketfd, buffer, BUFFER_SIZE-1, 0) ;
   return status;
 }
 
@@ -325,10 +326,10 @@ void communication_loop(int socketfd)
     // printf("DEBUG communication_loop\n");
 		// se tem mensagem recebida, prints it to the client
     bzero(buffer, BUFFER_SIZE);
-    int size = recv(socketfd, buffer, BUFFER_SIZE, 0);
+    int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
     if(size > 0) //(size != -1)
     {
-      printf("\nMessage received: '%s' - size: %d\n", buffer, size);
+      // printf("\nDEBUG Message received: '%s' - size: %d\n", buffer, size);
       //put the message in a packet
       packet = buffer_to_packet(buffer);
       print_packet(packet); // DEBUG
@@ -341,7 +342,6 @@ void communication_loop(int socketfd)
     // send packet to server, if there is any
     if(!packets_to_send_fifo.empty())
 		{
-      // printf("DEBUG there is a packet to send!\n");
       // get the packet
       packet = packets_to_send_fifo.front();
 			packets_to_send_fifo.pop_front();
@@ -385,7 +385,6 @@ void * communication_thread(void *arg) {
 // and puts it in the to_send FIFO queue
 void * interface_thread(void *arg) {
 	interface_params params = *((interface_params *)arg);
-  char buffer[BUFFER_SIZE];
   char payload[PAYLOAD_SIZE];
   char user_input[PAYLOAD_SIZE];
   char string_to_parse[PAYLOAD_SIZE];
@@ -452,6 +451,9 @@ void * interface_thread(void *arg) {
 
         // print notification
         printf("Notification: %s\n", packet_received._payload);
+        
+        // free malloc
+        free(packet_received._payload);
       }
 
     } else {
