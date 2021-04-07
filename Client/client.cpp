@@ -306,7 +306,15 @@ void send_follow_message(int socketfd, char* profile_name)
   // fflush(stdout);
 }
 
-
+void print_commands()
+{
+  printf("\nCommands:");
+  printf("\n - SEND: to send a message to all followers.\n    usage: \'SEND message\'");
+  printf("\n - FOLLOW: to follow another user.\n    usage: \'FOLLOW username\'");
+  printf("\n - NOTIFICATIONS: to show received notifications.\n    usage: \'NOTIFICATIONS\'");
+  printf("\n\n");
+  fflush(stdout);
+}
 
 void communication_loop(int socketfd)
 {
@@ -342,7 +350,6 @@ void communication_loop(int socketfd)
       serialize_packet(packet, buffer);
       write_message(socketfd, buffer);
     }
-    sleep(1);
 }
 
 // function for the thread that
@@ -393,6 +400,8 @@ void * interface_thread(void *arg) {
   // print pthread id
 	pthread_t thread_id = pthread_self();
 	printf("Started thread %d\n", (int)thread_id);
+
+  print_commands();
 
   while(1){
     printf("Please enter your message:");
