@@ -387,7 +387,8 @@ void * interface_thread(void *arg) {
 
   char* parse_ptr;
   char* tail_ptr;
-	char delim[] = " ";
+	char delim[3] = " ";
+  int num_notifications;
 
   // print pthread id
 	pthread_t thread_id = pthread_self();
@@ -400,6 +401,7 @@ void * interface_thread(void *arg) {
 
     // parse user input
     strcpy(string_to_parse, user_input);
+    printf("DEBUG string_to_parse: %s", string_to_parse);
 	  parse_ptr = strtok(string_to_parse, delim);
     if (strcmp(parse_ptr, "FOLLOW") == 0) 
     {
@@ -417,7 +419,7 @@ void * interface_thread(void *arg) {
       packets_to_send_fifo.push_back(packet_to_send);
     } else if (strcmp(parse_ptr, "SEND") == 0) {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
-      tail_ptr = &user_input[4]; // get message
+      tail_ptr = &user_input[5]; // get message
 
       printf("DEBUG SEND - payload: '%s'\n", tail_ptr);
 
@@ -429,8 +431,9 @@ void * interface_thread(void *arg) {
       // put the packet in the FIFO queue
       packets_to_send_fifo.push_back(packet_to_send);
 
-    } else if (strcmp(parse_ptr, "NOTIFICATIONS") == 0) {  
-      printf("\n");
+    } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {  
+      num_notifications = packets_received_fifo.size();
+      printf("\nPrinting %d new notifications...\n", num_notifications);
       // prints received packets, if any
       while(!packets_received_fifo.empty())
       {
