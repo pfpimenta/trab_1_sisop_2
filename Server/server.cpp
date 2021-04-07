@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <utility>
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <list>
 
@@ -36,7 +37,7 @@ class Row {
 	protected:
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
-		std::list<std::string> messages_sent;
+		// std::list<std::string> messages_sent;
 
 	public:
 		Row(){}; //constructor
@@ -99,6 +100,73 @@ typedef struct __packet{
     char* _payload; // Dados da mensagem
 } packet;
 
+
+// saves the master_table into a TXT file
+void save_backup_table()
+{
+	//master_table
+	std::list<std::string> followers;
+	std::string username;
+	Row* row;
+	std::ofstream table_file;
+	table_file.open ("backup_table.txt", std::ios::out | std::ios::trunc); 
+	for(auto const& x : master_table)
+	{	
+		username = x.first;
+		row = x.second;
+		followers = row->getFollowers();
+
+		table_file << username;
+		table_file << ".";
+		
+		for (std::string follower : followers)
+		{
+			table_file << follower;
+			table_file << ",";
+		}
+		table_file << "\n";
+	}
+	table_file.close(); 
+}
+
+inline bool file_exists (const std::string& name) {
+    return ( access( name.c_str(), F_OK ) != -1 );
+}
+
+// loads the master_table from a TXT file, if it exists
+master_table_t load_backup_table()
+{
+	char* line_ptr;
+	char* token;
+	Row* row;
+
+	// if file exists
+	if(file_exists("backup_table.txt"))
+	{
+		std::ifstream table_file("backup_table.txt");
+		for( std::string line; getline( table_file, line ); )
+		{
+			row = new Row;
+			strcpy(line_ptr, line.c_str());
+
+			token = strtok_r(line_ptr, ".", &line_ptr);
+			std::string username(token);
+
+			token = strtok_r(line_ptr, ",", &line_ptr);
+			while(token != NULL)
+			{
+				std::string follower(token);
+				row->setAddNewFollower(follower);
+				token = strtok_r(line_ptr, ",", &line_ptr);
+			}
+
+			// insert new (usename, row) in master_table
+			master_table.insert( std::make_pair( username, row) );
+		}
+		table_file.close(); 
+	}
+	return master_table;
+}
 
 // reads a message from a socket (receives a message through it)
 void read_message(int newsockfd, char* buffer)
@@ -250,7 +318,13 @@ void * socket_thread(void *arg) {
 					std::string Username(payload); //copying char array into proper std::string type
 					CurrentUser = Username;
 					Row* newRow = new Row;
-					master_table.insert( std::make_pair( Username, newRow) ); //TODO: check if map already has the username in there before inserting
+
+					// check if map already has the username in there before inserting
+					if(master_table.find(Username) == master_table.end())
+					{
+						master_table.insert( std::make_pair( Username, newRow) );
+						save_backup_table();
+					}
 					break;
 				}
 				case TYPE_FOLLOW:
@@ -263,6 +337,7 @@ void * socket_thread(void *arg) {
 						currentRow = master_table.find(CurrentUser)->second;
 						Row* followingRow = master_table.find(newFollowingUsername)->second;
 						followingRow->setAddNewFollower(CurrentUser);
+						save_backup_table();
 					} else {
 						printf("ERROR: user does not exist!\n");
 						fflush(stdout);
@@ -348,7 +423,10 @@ int main(int argc, char *argv[])
 	packet packet_to_send;
   	pthread_t tid[MAX_THREADS];
 
-    // setup LISTEN socket
+	// load backup table
+	master_table = load_backup_table();
+    
+	// setup LISTEN socket
     sockfd = setup_socket();
 	printf("LISTEN socket open and ready. \n");
 

@@ -363,13 +363,9 @@ void * communication_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Started thread %d\n", (int)thread_id);
 
+  // setup socket and send CONNECT message
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
-
-  // Test a FOLLOW packet
-  char name[99] = "usuario_teste";
-  char* follow_name = &name[0];
-  send_follow_message(socketfd, follow_name);
 
 	while(1){
     communication_loop(socketfd);
@@ -453,7 +449,6 @@ void * interface_thread(void *arg) {
 
         // print notification
         printf("Notification: %s\n", packet_received._payload);
-        printf("Notification: %ld\n", strlen(packet_received._payload));
         
         // free malloc
         free(packet_received._payload);
