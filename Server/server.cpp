@@ -15,6 +15,29 @@
 #include <fstream>
 #include <map>
 #include <list>
+#include <pthread.h>
+
+pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
+int reader_counter = 0;
+
+void shared_reader_lock(){
+	pthread_mutex_lock(&reader_mutex);
+	reader_counter++;
+	if(reader_counter == 1){
+		pthread_mutex_lock(&read_write_mutex);
+	}
+	pthread_mutex_unlock(&reader_mutex);
+}
+
+void shared_reader_unlock(){
+	pthread_mutex_lock(&reader_mutex);
+	reader_counter--;
+	if(reader_counter == 0){
+		pthread_mutex_unlock(&read_write_mutex);
+	}
+	pthread_mutex_unlock(&reader_mutex);
+}
 
 #define PORT 4001
 #define MAX_THREADS 30 // maximum number of threads allowed
@@ -47,53 +70,70 @@ class Row {
 		};
 
 		void startSession(){
+			pthread_mutex_lock(&read_write_mutex);
 			this->active_sessions += 1;
+			pthread_mutex_unlock(&read_write_mutex);
 		}
 
 		void closeSession(){
+			pthread_mutex_lock(&read_write_mutex);
 			this->active_sessions -= 1;
+			pthread_mutex_unlock(&read_write_mutex);
 		}
 
 		int getActiveSessions(){
-			return this->active_sessions;
-		}
+			shared_reader_lock();
+			int num_active_sessions = this->active_sessions;
+			shared_reader_unlock();
+			return num_active_sessions;
+			}
 
 		std::list<std::string> getFollowers() {
-			return this->followers;
+			shared_reader_lock();
+			std::list<std::string> followersList = this->followers;
+			shared_reader_unlock();
+			return followersList;
 		}
 
 		void setAddNewFollower(std::string username) {
+			pthread_mutex_lock(&read_write_mutex);
 			this->followers.push_back( username );
 			// TODO checar se existe o username antes de inserir
 			std::cout<<"DEBUG new follower: ";
 			std::cout<<username;
 			std::cout<<"\n";
 			fflush(stdout);
+			pthread_mutex_unlock(&read_write_mutex);
 		}
 
 		void addNotification(std::string username, std::string message) {
+			pthread_mutex_lock(&read_write_mutex);
 			// first, generate payload string
 			std::string payload = "@" + username + ": " + message;
-			
 			// put payload in list
 			messages_to_receive.push_back(payload);
-
-			std::cout << "DEBUG new notification: " << username << "\n";
+			pthread_mutex_unlock(&read_write_mutex);
 		}
 
 		// returns True if there is a notification
 		bool hasNewNotification(){
+			shared_reader_lock();
+			bool hasNotifications;
 			if(!this->messages_to_receive.empty()) {
-				return true;
+				hasNotifications = true;
 			} else {
-				return false;
+				hasNotifications= false;
 			}
+			shared_reader_unlock();
+			return hasNotifications;
 		}
 
 		// if there is a notification, removes it from the list and return it
 		std::string getNotification() {
+			shared_reader_lock();
 			std::string notification = this->messages_to_receive.front();
 			this->messages_to_receive.pop_front();
+			shared_reader_unlock();
 			return notification;
 		}
 
@@ -101,6 +141,7 @@ class Row {
 typedef std::map< std::string, Row*> master_table_t;
 
 master_table_t master_table; //Globally accessible master table instance
+
 //------------------
 
 typedef struct __packet{
@@ -159,6 +200,8 @@ master_table_t load_backup_table()
 	// if file exists
 	if(file_exists("backup_table.txt"))
 	{
+		printf("Loading backup table... \n");
+		fflush(stdout);
 		std::ifstream table_file("backup_table.txt");
 		for( std::string line; getline( table_file, line ); )
 		{
@@ -177,9 +220,14 @@ master_table_t load_backup_table()
 			}
 
 			// insert new (usename, row) in master_table
+			pthread_mutex_lock(&read_write_mutex);
 			master_table.insert( std::make_pair( username, row) );
+			pthread_mutex_unlock(&read_write_mutex);
 		}
 		table_file.close(); 
+	} else {
+		printf("Backup table not found. Creating new. \n");
+		fflush(stdout);
 	}
 	return master_table;
 }
@@ -309,6 +357,7 @@ void * socket_thread(void *arg) {
 
 			client_message[size] = '\0';
 			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+			fflush(stdout);
 
 			char* token;
   			char* rest = client_message;
@@ -341,13 +390,24 @@ void * socket_thread(void *arg) {
 					Row* newRow = new Row;
 
 					// check if map already has the username in there before inserting
+					pthread_mutex_lock(&read_write_mutex);
 					if(master_table.find(Username) == master_table.end())
 					{
 						master_table.insert( std::make_pair( Username, newRow) );
-						save_backup_table(); // TODO mutex
+						save_backup_table();
 					}
-					
+					pthread_mutex_unlock(&read_write_mutex);
+
+
+					printf("DEBUG -o-o-o-o-o-o-o- antes\n"); fflush(stdout);
+
+					// checks if there are already 2 open sessions for this user
+					shared_reader_lock();
 					currentRow = master_table.find(CurrentUser)->second;
+					shared_reader_unlock();
+
+					printf("DEBUG -o-o-o-o-o-o-o- AAA\n"); fflush(stdout);
+
 					if(currentRow->getActiveSessions() >= 2){
 						printf("ERROR: there are already 2 active sessions!\n");
 						// TODO send ERROR packet to client
@@ -355,6 +415,8 @@ void * socket_thread(void *arg) {
 					} else {
 						currentRow->startSession();
 					}
+					printf("DEBUG -o-o-o-o-o-o-o- BBB\n"); fflush(stdout);
+
 					break;
 				}
 				case TYPE_FOLLOW:
@@ -456,7 +518,7 @@ int main(int argc, char *argv[])
 
 	// load backup table
 	master_table = load_backup_table();
-    
+
 	// setup LISTEN socket
     sockfd = setup_socket();
 	printf("LISTEN socket open and ready. \n");
