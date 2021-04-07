@@ -176,7 +176,7 @@ packet buffer_to_packet(char* buffer){
 void serialize_packet(packet packet_to_send, char* buffer)
 {
   bzero(buffer, sizeof(buffer));
-  snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s",
+  snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
 
@@ -224,16 +224,6 @@ void read_message(int socketfd, char* buffer)
 	n = read(socketfd, buffer, BUFFER_SIZE);
 	if (n < 0) 
 		printf("ERROR reading from socket\n");
-}
-
-// checks if there is something in the socket
-// and puts it in the given buffer
-// (returns -1 if there was nothing there)
-int try_read_socket(int socketfd, char* buffer)
-{
-  int status;
-  status = recv(socketfd, buffer, BUFFER_SIZE-1, 0) ;
-  return status;
 }
 
 int setup_socket(communication_params params)
@@ -328,7 +318,6 @@ void communication_loop(int socketfd)
     char payload[PAYLOAD_SIZE];
     packet packet;
 
-    // printf("DEBUG communication_loop\n");
 		// se tem mensagem recebida, prints it to the client
     bzero(buffer, BUFFER_SIZE);
     int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
@@ -413,7 +402,6 @@ void * interface_thread(void *arg) {
     // parse user input
     rest = string_to_parse;
     strcpy(string_to_parse, user_input);
-    printf("DEBUG string_to_parse: %s", string_to_parse);
 	  parse_ptr = strtok_r(string_to_parse, delim, &rest);
     if (strcmp(parse_ptr, "FOLLOW") == 0) 
     {

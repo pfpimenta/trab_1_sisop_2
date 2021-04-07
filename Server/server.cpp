@@ -39,7 +39,7 @@ void shared_reader_unlock(){
 	pthread_mutex_unlock(&reader_mutex);
 }
 
-#define PORT 4001
+#define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
@@ -128,7 +128,7 @@ class Row {
 			return hasNotifications;
 		}
 
-		// if there is a notification, removes it from the list and return it
+		// removes a notification from the list and return it
 		std::string getNotification() {
 			shared_reader_lock();
 			std::string notification = this->messages_to_receive.front();
@@ -239,18 +239,6 @@ void closeConnection(int socket, int thread_id)
 	pthread_exit(NULL);
 }
 
-// reads a message from a socket (receives a message through it)
-void read_message(int newsockfd, char* buffer)
-{
-	// make sure buffer is clear	
-  	bzero(buffer, BUFFER_SIZE);
-	/* read from the socket */
-    int n;
-	n = read(newsockfd, buffer, BUFFER_SIZE);
-	if (n < 0) 
-		printf("ERROR reading from socket");
-}
-
 // writes a message in a socket (sends a message through it)
 void write_message(int newsockfd, char* message)
 {
@@ -305,7 +293,7 @@ int accept_connection(int sockfd)
 void serialize_packet(packet packet_to_send, char* buffer)
 {
   bzero(buffer, sizeof(buffer));
-  snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s",
+  snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
 
@@ -356,123 +344,127 @@ void * socket_thread(void *arg) {
 			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 
 			client_message[size] = '\0';
-			printf("Thread %d - Received message: %s\n", (int)thread_id, client_message);
+			printf("Thread %d - Read buffer: %s\n", (int)thread_id, client_message);
 			fflush(stdout);
 
-			char* token;
-  			char* rest = client_message;
-			const char delimiter[2] = ",";
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+  			char* rest_packet = client_message;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				char* token;
+				char* rest = buffer;
+				const char delimiter[2] = ",";
 
-			//seqn
-			token = strtok_r(rest, delimiter, &rest);
-			reference_seqn = atoi(token);
+				//seqn
+				token = strtok_r(rest, delimiter, &rest);
+				reference_seqn = atoi(token);
 
-			//payload_length
-			token = strtok_r(rest, delimiter, &rest);
-			payload_length = atoi(token);
+				//payload_length
+				token = strtok_r(rest, delimiter, &rest);
+				payload_length = atoi(token);
 
-			//packet_type
-			token = strtok_r(rest, delimiter, &rest);
-			message_type = atoi(token);
+				//packet_type
+				token = strtok_r(rest, delimiter, &rest);
+				message_type = atoi(token);
 
-			//payload (get whatever else is in there)
-			token = strtok_r(rest, "", &rest);
-			strncpy(payload, token, payload_length);
+				//payload (get whatever else is in there up to '\n')
+				token = strtok_r(rest, "\n", &rest);
+				strncpy(payload, token, payload_length);
 
-			printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
-			fflush(stdout);
+				printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
+				fflush(stdout);
 
-			switch (message_type) {
-				case TYPE_CONNECT:
-				{
-					std::string Username(payload); //copying char array into proper std::string type
-					CurrentUser = Username;
-					Row* newRow = new Row;
-
-					// check if map already has the username in there before inserting
-					pthread_mutex_lock(&read_write_mutex);
-					if(master_table.find(Username) == master_table.end())
+				switch (message_type) {
+					case TYPE_CONNECT:
 					{
-						master_table.insert( std::make_pair( Username, newRow) );
-						save_backup_table();
-					}
-					pthread_mutex_unlock(&read_write_mutex);
+						std::string Username(payload); //copying char array into proper std::string type
+						CurrentUser = Username;
+						Row* newRow = new Row;
 
-
-					printf("DEBUG -o-o-o-o-o-o-o- antes\n"); fflush(stdout);
-
-					// checks if there are already 2 open sessions for this user
-					shared_reader_lock();
-					currentRow = master_table.find(CurrentUser)->second;
-					shared_reader_unlock();
-
-					printf("DEBUG -o-o-o-o-o-o-o- AAA\n"); fflush(stdout);
-
-					if(currentRow->getActiveSessions() >= 2){
-						printf("ERROR: there are already 2 active sessions!\n");
-						// TODO send ERROR packet to client
-						closeConnection(socket, (int)thread_id);
-					} else {
-						currentRow->startSession();
-					}
-					printf("DEBUG -o-o-o-o-o-o-o- BBB\n"); fflush(stdout);
-
-					break;
-				}
-				case TYPE_FOLLOW:
-				{
-					std::string newFollowingUsername(payload); //copying char array into proper std::string type
-					 
-					// check if current user exists and if newFollowing exists
-					if(master_table.find(CurrentUser) != master_table.end() && master_table.find(newFollowingUsername) != master_table.end())
-					{
-						currentRow = master_table.find(CurrentUser)->second;
-						Row* followingRow = master_table.find(newFollowingUsername)->second;
-						followingRow->setAddNewFollower(CurrentUser);
-						save_backup_table(); // TODO mutex
-					} else {
-						printf("ERROR: user does not exist!\n");
-						fflush(stdout);
-						// TODO send ERROR packet to client
-					}
-					break;
-				}
-				case TYPE_SEND:
-				{
-					// check if current user exists
-					if(master_table.find(CurrentUser) != master_table.end())
-					{
-						currentRow = master_table.find(CurrentUser)->second;
-						std::string message(payload); //copying char array into proper std::string type
-						std::list<std::string> followers = currentRow->getFollowers();
-						for (std::string follower : followers){
-							Row* followerRow = master_table.find(follower)->second;
-							followerRow->addNotification(CurrentUser, message);
+						// check if map already has the username in there before inserting
+						pthread_mutex_lock(&read_write_mutex);
+						if(master_table.find(Username) == master_table.end())
+						{
+							master_table.insert( std::make_pair( Username, newRow) );
+							save_backup_table();
 						}
-					} else {
-						printf("ERROR: user does not exist!\n");
-						fflush(stdout);
+						pthread_mutex_unlock(&read_write_mutex);
+
+						// checks if there are already 2 open sessions for this user
+						shared_reader_lock();
+						currentRow = master_table.find(CurrentUser)->second;
+						shared_reader_unlock();
+						if(currentRow->getActiveSessions() >= 2){
+							printf("ERROR: there are already 2 active sessions!\n");
+							// TODO send ERROR packet to client
+							closeConnection(socket, (int)thread_id);
+						} else {
+							currentRow->startSession();
+						}
+						break;
 					}
-					break;
+					case TYPE_FOLLOW:
+					{
+						std::string newFollowingUsername(payload); //copying char array into proper std::string type
+						
+						// check if current user exists and if newFollowing exists
+						if(master_table.find(CurrentUser) != master_table.end() && master_table.find(newFollowingUsername) != master_table.end())
+						{
+							shared_reader_lock();
+							currentRow = master_table.find(CurrentUser)->second;
+							Row* followingRow = master_table.find(newFollowingUsername)->second;
+							shared_reader_unlock();
+							followingRow->setAddNewFollower(CurrentUser);
+							save_backup_table(); // TODO mutex
+						} else {
+							printf("ERROR: user does not exist!\n");
+							fflush(stdout);
+							// TODO send ERROR packet to client
+						}
+						break;
+					}
+					case TYPE_SEND:
+					{
+						// check if current user exists
+						if(master_table.find(CurrentUser) != master_table.end())
+						{
+							shared_reader_lock();
+							currentRow = master_table.find(CurrentUser)->second;
+							shared_reader_unlock();
+							std::string message(payload); //copying char array into proper std::string type
+							std::list<std::string> followers = currentRow->getFollowers();
+							for (std::string follower : followers){
+								Row* followerRow = master_table.find(follower)->second;
+								followerRow->addNotification(CurrentUser, message);
+							}
+						} else {
+							printf("ERROR: user does not exist!\n");
+							fflush(stdout);
+						}
+						break;
+					}
 				}
+				// send ACK
+				/*reference_seqn = 0; // TODO
+				bzero(payload, sizeof(payload));
+				snprintf(payload, PAYLOAD_SIZE, "%d", reference_seqn);
+				packet_to_send = create_packet(payload, 4);
+				serialize_packet(packet_to_send, reply);
+				printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
+				write_message(socket, reply);*/
 			}
-			// send ACK
-			/*reference_seqn = 0; // TODO
-	  		bzero(payload, sizeof(payload));
-			snprintf(payload, PAYLOAD_SIZE, "%d", reference_seqn);
-			packet_to_send = create_packet(payload, 4);
-			serialize_packet(packet_to_send, reply);
-			printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
-			write_message(socket, reply);*/
 		}
 
 
 		// send message, if there is any
 		if(CurrentUser != "not-connected") // if the user has already connected
 		{
+			shared_reader_lock();
 			currentRow = master_table.find(CurrentUser)->second;
-			// TODO : send to all client sessions, if there are more than 1
-			
+			shared_reader_unlock();			
+
 			if(currentRow->hasNewNotification())
 			{
 				notification = currentRow->getNotification();
