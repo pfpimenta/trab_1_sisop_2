@@ -18,7 +18,6 @@
 #define PAYLOAD_SIZE 128
 
 int seqn = 0;
-sem_t is_empty, is_full;
 
 typedef struct __communication_params{
   char* profile_name;
@@ -50,6 +49,9 @@ typedef struct __packet{
 // TODO Mutex
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
+
+pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t packets_received_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 const char* get_packet_type_string(int packet_type)
@@ -334,12 +336,14 @@ void communication_loop(int socketfd)
     {
       //put the message in a packet
       packet = buffer_to_packet(buffer);
-      //print_packet(packet); // DEBUG
       // put the packet in the received FIFO
+      pthread_mutex_lock(&packets_received_mutex);
       packets_received_fifo.push_back(packet);
+      pthread_mutex_unlock(&packets_received_mutex);
     }
 
     // send packet to server, if there is any
+    pthread_mutex_lock(&packets_to_send_mutex);
     if(!packets_to_send_fifo.empty())
 		{
       // get the packet
@@ -350,6 +354,8 @@ void communication_loop(int socketfd)
       serialize_packet(packet, buffer);
       write_message(socketfd, buffer);
     }
+    pthread_mutex_unlock(&packets_to_send_mutex);
+
 }
 
 // function for the thread that
@@ -422,7 +428,9 @@ void * interface_thread(void *arg) {
       packet_to_send = create_packet(payload, 1);
       
       // put the packet in the FIFO queue
+      pthread_mutex_lock(&packets_to_send_mutex);
       packets_to_send_fifo.push_back(packet_to_send);
+      pthread_mutex_unlock(&packets_to_send_mutex);
     } else if (strcmp(parse_ptr, "SEND") == 0) {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
       tail_ptr = &user_input[5]; // get message
@@ -435,12 +443,17 @@ void * interface_thread(void *arg) {
       packet_to_send = create_packet(payload, 2);
       
       // put the packet in the FIFO queue
+      pthread_mutex_lock(&packets_to_send_mutex);
       packets_to_send_fifo.push_back(packet_to_send);
+      pthread_mutex_unlock(&packets_to_send_mutex);
 
-    } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {  
+    } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {
+      pthread_mutex_lock(&packets_received_mutex);
       num_notifications = packets_received_fifo.size();
+      pthread_mutex_unlock(&packets_received_mutex);
       printf("\nPrinting %d new notifications...\n", num_notifications);
       // prints received packets, if any
+      pthread_mutex_lock(&packets_received_mutex);
       while(!packets_received_fifo.empty())
       {
         // get the packet
@@ -453,6 +466,7 @@ void * interface_thread(void *arg) {
         // free malloc
         free(packet_received._payload);
       }
+      pthread_mutex_unlock(&packets_received_mutex);
 
     } else {
       printf("ERROR: did not recognize command: %s\n", parse_ptr);
@@ -479,10 +493,6 @@ int main(int argc, char*argv[])
     communication_parameters.server_ip_address = argv[2];
     communication_parameters.port = atoi(argv[3]);
   }
-
-  // initialize semaphore variables
-  sem_init(&is_empty, 1, 1);
-  sem_init(&is_full, 1, 1);
   
   // create thread for receiving server packets
   if (pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters) != 0 ) {
