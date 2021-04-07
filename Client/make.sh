@@ -1,1 +1,1 @@
-g++ client.cpp -o client -lpthread
+g++ client.cpp -o client -pthread

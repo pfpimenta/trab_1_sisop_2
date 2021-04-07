@@ -1,1 +1,1 @@
-g++ server.cpp -o server -lpthread
+g++ server.cpp -o server -pthread
