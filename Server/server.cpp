@@ -39,9 +39,9 @@ class Row {
 		std::list<std::string> messages_sent;
 
 	public:
-		Row(); //constructor
+		Row(){}; //constructor
 
-		std::list<std::string> getFollowersList() {
+		std::list<std::string> getFollowers() {
 			return this->followers;
 		}
 
@@ -79,8 +79,8 @@ class Row {
 			this->messages_to_receive.pop_front();
 			return notification;
 		}
-};
 
+};
 typedef std::map< std::string, Row*> master_table_t;
 
 master_table_t master_table; //Globally accessible master table instance
@@ -199,9 +199,11 @@ void * socket_thread(void *arg) {
 	char buffer[BUFFER_SIZE];
 	int message_type = -1;
 	int payload_length = -1;
+	Row* currentRow;
 	std::string CurrentUser = "not-connected";
 
 	std::string notification;
+
 	
 	packet packet_to_send;
 
@@ -253,27 +255,41 @@ void * socket_thread(void *arg) {
 				{
 					std::string Username(payload); //copying char array into proper std::string type
 					CurrentUser = Username;
-					master_table.insert( std::make_pair( Username, new Row() ) ); //TODO: check if map already has the username in there before inserting
+					Row* newRow = new Row;
+					master_table.insert( std::make_pair( Username, newRow) ); //TODO: check if map already has the username in there before inserting
 					break;
 				}
 				case TYPE_FOLLOW:
 				{
-					std::string newFollowerUsername(payload); //copying char array into proper std::string type
-					Row* CurrentRow = master_table.find(CurrentUser)->second;
-					Row* followerRow = master_table.find(newFollowerUsername)->second;//TODO: segfault porque não validamos se esse usuário existe
-
-					followerRow->setAddNewFollower(CurrentUser);
-
+					std::string newFollowingUsername(payload); //copying char array into proper std::string type
+					 
+					// check if current user exists and if newFollowing exists
+					if(master_table.find(CurrentUser) != master_table.end() && master_table.find(newFollowingUsername) != master_table.end())
+					{
+						currentRow = master_table.find(CurrentUser)->second;
+						Row* followingRow = master_table.find(newFollowingUsername)->second;
+						followingRow->setAddNewFollower(CurrentUser);
+					} else {
+						printf("ERROR: user does not exist!\n");
+						fflush(stdout);
+					}
 					break;
 				}
 				case TYPE_SEND:
 				{
-					Row* currentRow = master_table.find(CurrentUser)->second;
-					std::string message(payload); //copying char array into proper std::string type
-					std::list<std::string> followers = currentRow->getFollowers();
-					for (std::string follower : followers){
-						Row* followerRow = master_table.find(follower)->second;
-						followerRow->addNotification(CurrentUser, message);
+					// check if current user exists
+					if(master_table.find(CurrentUser) != master_table.end())
+					{
+						currentRow = master_table.find(CurrentUser)->second;
+						std::string message(payload); //copying char array into proper std::string type
+						std::list<std::string> followers = currentRow->getFollowers();
+						for (std::string follower : followers){
+							Row* followerRow = master_table.find(follower)->second;
+							followerRow->addNotification(CurrentUser, message);
+						}
+					} else {
+						printf("ERROR: user does not exist!\n");
+						fflush(stdout);
 					}
 					break;
 				}
@@ -292,7 +308,7 @@ void * socket_thread(void *arg) {
 		// send message, if there is any
 		if(CurrentUser != "not-connected") // if the user has already connected
 		{
-			Row* currentRow = master_table.find(CurrentUser)->second;
+			currentRow = master_table.find(CurrentUser)->second;
 			// TODO : send to all client sessions, if there are more than 1
 			
 			if(currentRow->hasNewNotification())
