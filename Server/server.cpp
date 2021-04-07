@@ -39,7 +39,7 @@ void shared_reader_unlock(){
 	pthread_mutex_unlock(&reader_mutex);
 }
 
-#define PORT 4000
+#define PORT 4001
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
@@ -61,7 +61,6 @@ class Row {
 		int active_sessions;
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
-		// std::list<std::string> messages_sent;
 
 	public:
 		//constructor
@@ -98,10 +97,6 @@ class Row {
 		void setAddNewFollower(std::string username) {
 			pthread_mutex_lock(&read_write_mutex);
 			this->followers.push_back( username );
-			// TODO checar se existe o username antes de inserir
-			std::cout<<"DEBUG new follower: ";
-			std::cout<<username;
-			std::cout<<"\n";
 			fflush(stdout);
 			pthread_mutex_unlock(&read_write_mutex);
 		}
@@ -167,6 +162,7 @@ void save_backup_table()
 	Row* row;
 	std::ofstream table_file;
 	table_file.open ("backup_table.txt", std::ios::out | std::ios::trunc); 
+	// TODO precisa de um lock aqui? tem q ver como botar sem dar conflito com getFollowers
 	for(auto const& x : master_table)
 	{	
 		username = x.first;
@@ -352,6 +348,7 @@ void * socket_thread(void *arg) {
   			char* rest_packet = client_message;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
+
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				char* token;
 				char* rest = buffer;
@@ -384,13 +381,17 @@ void * socket_thread(void *arg) {
 						Row* newRow = new Row;
 
 						// check if map already has the username in there before inserting
-						pthread_mutex_lock(&read_write_mutex);
-						if(master_table.find(Username) == master_table.end())
+						shared_reader_lock();
+						bool usernameDoesNotExist = (master_table.find(Username) == master_table.end());
+						shared_reader_unlock();
+						if(usernameDoesNotExist)
 						{
+							pthread_mutex_lock(&read_write_mutex);
 							master_table.insert( std::make_pair( Username, newRow) );
+							pthread_mutex_unlock(&read_write_mutex);
 							save_backup_table();
 						}
-						pthread_mutex_unlock(&read_write_mutex);
+
 
 						// checks if there are already 2 open sessions for this user
 						shared_reader_lock();
@@ -410,14 +411,19 @@ void * socket_thread(void *arg) {
 						std::string newFollowingUsername(payload); //copying char array into proper std::string type
 						
 						// check if current user exists and if newFollowing exists
-						if(master_table.find(CurrentUser) != master_table.end() && master_table.find(newFollowingUsername) != master_table.end())
+						shared_reader_lock();
+						bool currentUserExists = (master_table.find(CurrentUser) != master_table.end());
+						bool newFollowingExists = (master_table.find(newFollowingUsername) != master_table.end());
+						shared_reader_unlock();
+						if(currentUserExists && newFollowingExists)
 						{
 							shared_reader_lock();
 							currentRow = master_table.find(CurrentUser)->second;
 							Row* followingRow = master_table.find(newFollowingUsername)->second;
 							shared_reader_unlock();
+							// TODO checar se existe o username antes de inserir
 							followingRow->setAddNewFollower(CurrentUser);
-							save_backup_table(); // TODO mutex
+							save_backup_table();
 						} else {
 							printf("ERROR: user does not exist!\n");
 							fflush(stdout);
@@ -428,7 +434,10 @@ void * socket_thread(void *arg) {
 					case TYPE_SEND:
 					{
 						// check if current user exists
-						if(master_table.find(CurrentUser) != master_table.end())
+						shared_reader_lock();
+						bool cond = (master_table.find(CurrentUser) != master_table.end());
+						shared_reader_unlock();
+						if(cond)
 						{
 							shared_reader_lock();
 							currentRow = master_table.find(CurrentUser)->second;
@@ -436,7 +445,9 @@ void * socket_thread(void *arg) {
 							std::string message(payload); //copying char array into proper std::string type
 							std::list<std::string> followers = currentRow->getFollowers();
 							for (std::string follower : followers){
+								shared_reader_lock();
 								Row* followerRow = master_table.find(follower)->second;
+								shared_reader_unlock();
 								followerRow->addNotification(CurrentUser, message);
 							}
 						} else {

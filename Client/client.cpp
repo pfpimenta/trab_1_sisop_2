@@ -13,7 +13,6 @@
 #include <fcntl.h>
 #include <list>
 
-#define PORT 4000
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
@@ -148,7 +147,6 @@ packet buffer_to_packet(char* buffer){
   const char delimiter[2] = ",";
   char* rest = buffer;
 
-
   //seqn
   token = strtok_r(rest, delimiter, &rest);
   packet.seqn = atoi(token);
@@ -164,10 +162,10 @@ packet buffer_to_packet(char* buffer){
   //payload (get whatever else is in there)
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
   token = strtok_r(rest, "", &rest);
-  strncpy(payload, token, packet.length+1);
-  payload[packet.length+1] = '\0';
-  packet._payload = (char*) malloc(packet.length * sizeof(char));
-  memcpy(packet._payload, payload, packet.length * sizeof(char));
+  strncpy(payload, token, packet.length);
+  payload[packet.length] = '\0';
+  packet._payload = (char*) malloc((packet.length) * sizeof(char) + 1);
+  memcpy(packet._payload, payload, (packet.length) * sizeof(char) + 1);
 
   return packet;
 }
@@ -408,7 +406,7 @@ void * interface_thread(void *arg) {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
       tail_ptr = &user_input[7]; // get username
 
-      printf("DEBUG FOLLOW - payload: '%s'\n", tail_ptr);
+      printf("Sending a FOLLOW with payload: '%s'\n", tail_ptr);
 
       // put the message in a packet
       bzero(payload, sizeof(payload));
@@ -423,7 +421,7 @@ void * interface_thread(void *arg) {
       user_input[strlen(user_input)-1] = 0; // remove '\n'
       tail_ptr = &user_input[5]; // get message
 
-      printf("DEBUG SEND - payload: '%s'\n", tail_ptr);
+      printf("Sending a SEND with payload: '%s'\n", tail_ptr);
 
       // put the message in a packet
       bzero(payload, sizeof(payload));
