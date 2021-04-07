@@ -16,7 +16,7 @@
 #include <map>
 #include <list>
 
-#define PORT 4000
+#define PORT 4001
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
@@ -35,12 +35,28 @@ class Row {
 	// a row corresponds to a user
 
 	protected:
+		int active_sessions;
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
 		// std::list<std::string> messages_sent;
 
 	public:
-		Row(){}; //constructor
+		//constructor
+		Row(){
+			this->active_sessions = 0;
+		};
+
+		void startSession(){
+			this->active_sessions += 1;
+		}
+
+		void closeSession(){
+			this->active_sessions -= 1;
+		}
+
+		int getActiveSessions(){
+			return this->active_sessions;
+		}
 
 		std::list<std::string> getFollowers() {
 			return this->followers;
@@ -168,6 +184,13 @@ master_table_t load_backup_table()
 	return master_table;
 }
 
+void closeConnection(int socket, int thread_id)
+{
+	printf("Closing connection and exiting socket thread: %d\n", thread_id);
+	close(socket);
+	pthread_exit(NULL);
+}
+
 // reads a message from a socket (receives a message through it)
 void read_message(int newsockfd, char* buffer)
 {
@@ -262,9 +285,7 @@ void * socket_thread(void *arg) {
 	int payload_length = -1;
 	Row* currentRow;
 	std::string CurrentUser = "not-connected";
-
 	std::string notification;
-
 	
 	packet packet_to_send;
 
@@ -323,7 +344,16 @@ void * socket_thread(void *arg) {
 					if(master_table.find(Username) == master_table.end())
 					{
 						master_table.insert( std::make_pair( Username, newRow) );
-						save_backup_table();
+						save_backup_table(); // TODO mutex
+					}
+					
+					currentRow = master_table.find(CurrentUser)->second;
+					if(currentRow->getActiveSessions() >= 2){
+						printf("ERROR: there are already 2 active sessions!\n");
+						// TODO send ERROR packet to client
+						closeConnection(socket, (int)thread_id);
+					} else {
+						currentRow->startSession();
 					}
 					break;
 				}
@@ -337,11 +367,11 @@ void * socket_thread(void *arg) {
 						currentRow = master_table.find(CurrentUser)->second;
 						Row* followingRow = master_table.find(newFollowingUsername)->second;
 						followingRow->setAddNewFollower(CurrentUser);
-						save_backup_table();
+						save_backup_table(); // TODO mutex
 					} else {
 						printf("ERROR: user does not exist!\n");
 						fflush(stdout);
-						// TODO return ERROR packet to client
+						// TODO send ERROR packet to client
 					}
 					break;
 				}
@@ -407,6 +437,7 @@ void * socket_thread(void *arg) {
   	}while (1);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
+	currentRow->closeSession();
 	close(socket);
 	pthread_exit(NULL);
 }
