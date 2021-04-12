@@ -346,11 +346,11 @@ void * socket_thread(void *arg) {
 	do{
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
-		if (size != -1) {
+		if (size > 0) {
 			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 
 			client_message[size] = '\0';
-			printf("Thread %d - Read buffer: %s\n", (int)thread_id, client_message);
+			printf("Thread %d - Read buffer: %s (size: %d)\n", (int)thread_id, client_message, (int)size);
 			fflush(stdout);
 
 			// parse socket buffer: get several messages, if there are more than one
