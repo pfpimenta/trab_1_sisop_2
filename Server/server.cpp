@@ -16,6 +16,7 @@
 #include <map>
 #include <list>
 #include <pthread.h>
+#include <algorithm>
 
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -39,7 +40,7 @@ void shared_reader_unlock(){
 	pthread_mutex_unlock(&reader_mutex);
 }
 
-#define PORT 4001
+#define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
@@ -92,6 +93,15 @@ class Row {
 			std::list<std::string> followersList = this->followers;
 			shared_reader_unlock();
 			return followersList;
+		}
+
+		bool hasFollower(std::string followerUsername) {
+			shared_reader_lock();
+			std::list<std::string>::iterator it;
+			it = std::find(this->followers.begin(), this->followers.end(), followerUsername);
+			bool found = it != this->followers.end();
+			shared_reader_unlock();
+			return found;
 		}
 
 		void setAddNewFollower(std::string username) {
@@ -316,7 +326,7 @@ void * socket_thread(void *arg) {
 	int message_type = -1;
 	int payload_length = -1;
 	Row* currentRow;
-	std::string CurrentUser = "not-connected";
+	std::string currentUser = "not-connected";
 	std::string notification;
 	
 	packet packet_to_send;
@@ -377,7 +387,7 @@ void * socket_thread(void *arg) {
 					case TYPE_CONNECT:
 					{
 						std::string Username(payload); //copying char array into proper std::string type
-						CurrentUser = Username;
+						currentUser = Username;
 						Row* newRow = new Row;
 
 						// check if map already has the username in there before inserting
@@ -395,7 +405,7 @@ void * socket_thread(void *arg) {
 
 						// checks if there are already 2 open sessions for this user
 						shared_reader_lock();
-						currentRow = master_table.find(CurrentUser)->second;
+						currentRow = master_table.find(currentUser)->second;
 						shared_reader_unlock();
 						if(currentRow->getActiveSessions() >= 2){
 							printf("ERROR: there are already 2 active sessions!\n");
@@ -410,22 +420,32 @@ void * socket_thread(void *arg) {
 					{
 						std::string newFollowingUsername(payload); //copying char array into proper std::string type
 						
-						// check if current user exists and if newFollowing exists
+						// check if current user exists 
 						shared_reader_lock();
-						bool currentUserExists = (master_table.find(CurrentUser) != master_table.end());
+						bool currentUserExists = (master_table.find(currentUser) != master_table.end());
+						// check if newFollowing exists
 						bool newFollowingExists = (master_table.find(newFollowingUsername) != master_table.end());
+						// check if currentUser is not trying to follow himself
+						bool notFollowingHimself = (currentUser != newFollowingUsername);
 						shared_reader_unlock();
-						if(currentUserExists && newFollowingExists)
+						if(currentUserExists && newFollowingExists && notFollowingHimself)
 						{
 							shared_reader_lock();
-							currentRow = master_table.find(CurrentUser)->second;
+							currentRow = master_table.find(currentUser)->second;
 							Row* followingRow = master_table.find(newFollowingUsername)->second;
+							// check if currentUser does not follow newFollowing yet
+							bool notDuplicateFollowing = (! followingRow->hasFollower(currentUser));
 							shared_reader_unlock();
-							// TODO checar se existe o username antes de inserir
-							followingRow->setAddNewFollower(CurrentUser);
+							if(notDuplicateFollowing) {
+								followingRow->setAddNewFollower(currentUser);
+							} else {
+								printf("ERROR: client user is already following this other user!\n");
+								fflush(stdout);
+								// TODO send ERROR packet to client
+							}
 							save_backup_table();
 						} else {
-							printf("ERROR: user does not exist!\n");
+							printf("ERROR: one of the users does not exist OR user tried to follow himself!\n");
 							fflush(stdout);
 							// TODO send ERROR packet to client
 						}
@@ -435,12 +455,12 @@ void * socket_thread(void *arg) {
 					{
 						// check if current user exists
 						shared_reader_lock();
-						bool cond = (master_table.find(CurrentUser) != master_table.end());
+						bool cond = (master_table.find(currentUser) != master_table.end());
 						shared_reader_unlock();
 						if(cond)
 						{
 							shared_reader_lock();
-							currentRow = master_table.find(CurrentUser)->second;
+							currentRow = master_table.find(currentUser)->second;
 							shared_reader_unlock();
 							std::string message(payload); //copying char array into proper std::string type
 							std::list<std::string> followers = currentRow->getFollowers();
@@ -448,7 +468,7 @@ void * socket_thread(void *arg) {
 								shared_reader_lock();
 								Row* followerRow = master_table.find(follower)->second;
 								shared_reader_unlock();
-								followerRow->addNotification(CurrentUser, message);
+								followerRow->addNotification(currentUser, message);
 							}
 						} else {
 							printf("ERROR: user does not exist!\n");
@@ -470,10 +490,10 @@ void * socket_thread(void *arg) {
 
 
 		// send message, if there is any
-		if(CurrentUser != "not-connected") // if the user has already connected
+		if(currentUser != "not-connected") // if the user has already connected
 		{
 			shared_reader_lock();
-			currentRow = master_table.find(CurrentUser)->second;
+			currentRow = master_table.find(currentUser)->second;
 			shared_reader_unlock();			
 
 			if(currentRow->hasNewNotification())
