@@ -275,6 +275,9 @@ master_table_t load_backup_table()
 void closeConnection(int socket, int thread_id)
 {
 	printf("Closing connection and exiting socket thread: %d\n", thread_id);
+	if (shutdown(socket, SHUT_RDWR) !=0 ) {
+		std::cout << "Failed to shutdown a connection socket." << std::endl;
+	}
 	close(socket);
 	pthread_exit(NULL);
 }
@@ -297,7 +300,7 @@ int setup_socket()
 
 	if ((sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1) 
 	{
-        printf("ERROR opening socket");
+        printf("ERROR creating LISTEN socket");
         exit(-1);
 	}
 	serv_addr.sin_family = AF_INET;
@@ -305,13 +308,16 @@ int setup_socket()
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(serv_addr.sin_zero), 8);
     
-	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0) 
 	{
-		printf("ERROR on binding");
+		printf("ERROR on binding LISTEN socket");
         exit(-1);
 	}
 
-	listen(sockfd, 5);
+	if (listen(sockfd, 50) != 0) {
+		printf("ERROR on activating LISTEN socket");
+        exit(-1);
+	}
 
     return sockfd;
 }
@@ -518,6 +524,9 @@ void * socket_thread(void *arg) {
 						currentRow = master_table.find(currentUser)->second;
 						printf("Exiting socket thread: %d\n", (int)thread_id);
 						currentRow->closeSession();
+						if (shutdown(socket, SHUT_RDWR) !=0 ) {
+							std::cout << "Failed to shutdown a connection socket." << std::endl;
+						}
 						close(socket);
 						pthread_exit(NULL);
 						break;
@@ -592,6 +601,9 @@ void * socket_thread(void *arg) {
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	currentRow->closeSession();
+	if (shutdown(socket, SHUT_RDWR) !=0 ) {
+		std::cout << "Failed to shutdown a connection socket." << std::endl;
+	}
 	close(socket);
 	pthread_exit(NULL);
 }
@@ -644,6 +656,9 @@ int main(int argc, char *argv[])
 
 		// Cleanup code for main server thread
 		if(termination_signal == true) {
+			if (shutdown(sockfd, SHUT_RDWR) !=0 ) {
+				std::cout << "Failed to shutdown a connection socket." << std::endl;
+			}
 			close(sockfd);
 			for (auto const& i : threads_list) {
 				pthread_join(i, NULL);
@@ -654,13 +669,5 @@ int main(int argc, char *argv[])
 			std::cout << "Exiting..." << std::endl;
 			exit(0);
 		}
-
-		sleep(1);
-
-		// TODO: codigo pra limitar o numero maximo de threads
-		// e fechar threads que ja terminaram
 	}
-
-	close(sockfd);
-	return 0; 
 }
