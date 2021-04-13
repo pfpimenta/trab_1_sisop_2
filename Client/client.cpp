@@ -409,12 +409,13 @@ void * interface_thread(void *arg) {
     {
       printf("Ending connection with server. Terminating client.\n");
       // create DISCONNECT packet and put in the to_send FIFO
-      snprintf(payload, PAYLOAD_SIZE, "");
+      snprintf(payload, PAYLOAD_SIZE, " ");
       packet_to_send = create_packet(payload, 6);
       // put the packet in the FIFO queue
       pthread_mutex_lock(&packets_to_send_mutex);
       packets_to_send_fifo.push_back(packet_to_send);
       pthread_mutex_unlock(&packets_to_send_mutex);
+      sleep(3);
       exit(0);
     }
 
