@@ -19,6 +19,7 @@
 #include <csignal>
 #include <algorithm>
 #include <iterator>
+#include <ctime>
 
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -53,6 +54,7 @@ void shared_reader_unlock(){
 #define TYPE_MSG 3
 #define TYPE_ACK 4
 #define TYPE_ERROR 5
+#define TYPE_DISCONNECT 6
 
 int seqn = 0;
 
@@ -66,6 +68,7 @@ class Row {
 
 	protected:
 		int active_sessions;
+		bool notification_delivered;
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
 
@@ -73,6 +76,7 @@ class Row {
 		//constructor
 		Row(){
 			this->active_sessions = 0;
+			this->notification_delivered = false;
 		};
 
 		void startSession(){
@@ -92,13 +96,35 @@ class Row {
 			int num_active_sessions = this->active_sessions;
 			shared_reader_unlock();
 			return num_active_sessions;
-			}
+		}
+
+		bool get_notification_delivered(){
+			shared_reader_lock();
+			bool notification_delivered = this->notification_delivered;
+			shared_reader_unlock();
+			return notification_delivered;
+		}
+
+		void set_notification_delivered(bool was_notification_delivered){
+			pthread_mutex_lock(&read_write_mutex);
+			this->notification_delivered = was_notification_delivered;
+			pthread_mutex_unlock(&read_write_mutex);
+		}
 
 		std::list<std::string> getFollowers() {
 			shared_reader_lock();
 			std::list<std::string> followersList = this->followers;
 			shared_reader_unlock();
 			return followersList;
+		}
+
+		bool hasFollower(std::string followerUsername) {
+			shared_reader_lock();
+			std::list<std::string>::iterator it;
+			it = std::find(this->followers.begin(), this->followers.end(), followerUsername);
+			bool found = it != this->followers.end();
+			shared_reader_unlock();
+			return found;
 		}
 
 		void setAddNewFollower(std::string username) {
@@ -131,14 +157,22 @@ class Row {
 		}
 
 		// removes a notification from the list and return it
-		std::string getNotification() {
+		std::string popNotification() {
 			shared_reader_lock();
 			std::string notification = this->messages_to_receive.front();
 			this->messages_to_receive.pop_front();
 			shared_reader_unlock();
+			this->set_notification_delivered(false);
 			return notification;
 		}
 
+		// returns a notification from the list
+		std::string getNotification() {
+			shared_reader_lock();
+			std::string notification = this->messages_to_receive.front();
+			shared_reader_unlock();
+			return notification;
+		}
 };
 typedef std::map< std::string, Row*> master_table_t;
 
@@ -154,6 +188,7 @@ typedef struct __packet{
         // 3 - MSG (username, message_sent, seqn)
         // 4 - ACK (seqn)
         // 5 - ERROR (seqn)
+        // 6 - DISCONNECT (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem
@@ -325,7 +360,7 @@ void * socket_thread(void *arg) {
 	int message_type = -1;
 	int payload_length = -1;
 	Row* currentRow;
-	std::string CurrentUser = "not-connected";
+	std::string currentUser = "not-connected";
 	std::string notification;
 	
 	packet packet_to_send;
@@ -345,11 +380,11 @@ void * socket_thread(void *arg) {
 	do{
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
-		if (size != -1) {
+		if (size > 0) {
 			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 
 			client_message[size] = '\0';
-			printf("Thread %d - Read buffer: %s\n", (int)thread_id, client_message);
+			printf("Thread %d - Read buffer: %s (size: %d)\n", (int)thread_id, client_message, (int)size);
 			fflush(stdout);
 
 			// parse socket buffer: get several messages, if there are more than one
@@ -386,7 +421,7 @@ void * socket_thread(void *arg) {
 					case TYPE_CONNECT:
 					{
 						std::string Username(payload); //copying char array into proper std::string type
-						CurrentUser = Username;
+						currentUser = Username;
 						Row* newRow = new Row;
 
 						// check if map already has the username in there before inserting
@@ -404,12 +439,15 @@ void * socket_thread(void *arg) {
 
 						// checks if there are already 2 open sessions for this user
 						shared_reader_lock();
-						currentRow = master_table.find(CurrentUser)->second;
+						currentRow = master_table.find(currentUser)->second;
 						shared_reader_unlock();
-						if(currentRow->getActiveSessions() >= 2){
+						int activeSessions = currentRow->getActiveSessions();
+						if(activeSessions >= 2){
 							printf("ERROR: there are already 2 active sessions!\n");
 							// TODO send ERROR packet to client
 							closeConnection(socket, (int)thread_id);
+						} else if (activeSessions == 1) {
+							currentRow->startSession();
 						} else {
 							currentRow->startSession();
 						}
@@ -419,22 +457,32 @@ void * socket_thread(void *arg) {
 					{
 						std::string newFollowingUsername(payload); //copying char array into proper std::string type
 						
-						// check if current user exists and if newFollowing exists
+						// check if current user exists 
 						shared_reader_lock();
-						bool currentUserExists = (master_table.find(CurrentUser) != master_table.end());
+						bool currentUserExists = (master_table.find(currentUser) != master_table.end());
+						// check if newFollowing exists
 						bool newFollowingExists = (master_table.find(newFollowingUsername) != master_table.end());
+						// check if currentUser is not trying to follow himself
+						bool notFollowingHimself = (currentUser != newFollowingUsername);
 						shared_reader_unlock();
-						if(currentUserExists && newFollowingExists)
+						if(currentUserExists && newFollowingExists && notFollowingHimself)
 						{
 							shared_reader_lock();
-							currentRow = master_table.find(CurrentUser)->second;
+							currentRow = master_table.find(currentUser)->second;
 							Row* followingRow = master_table.find(newFollowingUsername)->second;
+							// check if currentUser does not follow newFollowing yet
+							bool notDuplicateFollowing = (! followingRow->hasFollower(currentUser));
 							shared_reader_unlock();
-							// TODO checar se existe o username antes de inserir
-							followingRow->setAddNewFollower(CurrentUser);
+							if(notDuplicateFollowing) {
+								followingRow->setAddNewFollower(currentUser);
+							} else {
+								printf("ERROR: client user is already following this other user!\n");
+								fflush(stdout);
+								// TODO send ERROR packet to client
+							}
 							save_backup_table();
 						} else {
-							printf("ERROR: user does not exist!\n");
+							printf("ERROR: one of the users does not exist OR user tried to follow himself!\n");
 							fflush(stdout);
 							// TODO send ERROR packet to client
 						}
@@ -444,12 +492,12 @@ void * socket_thread(void *arg) {
 					{
 						// check if current user exists
 						shared_reader_lock();
-						bool cond = (master_table.find(CurrentUser) != master_table.end());
+						bool cond = (master_table.find(currentUser) != master_table.end());
 						shared_reader_unlock();
 						if(cond)
 						{
 							shared_reader_lock();
-							currentRow = master_table.find(CurrentUser)->second;
+							currentRow = master_table.find(currentUser)->second;
 							shared_reader_unlock();
 							std::string message(payload); //copying char array into proper std::string type
 							std::list<std::string> followers = currentRow->getFollowers();
@@ -457,12 +505,21 @@ void * socket_thread(void *arg) {
 								shared_reader_lock();
 								Row* followerRow = master_table.find(follower)->second;
 								shared_reader_unlock();
-								followerRow->addNotification(CurrentUser, message);
+								followerRow->addNotification(currentUser, message);
 							}
 						} else {
 							printf("ERROR: user does not exist!\n");
 							fflush(stdout);
 						}
+						break;
+					}
+					case TYPE_DISCONNECT:
+					{
+						currentRow = master_table.find(currentUser)->second;
+						printf("Exiting socket thread: %d\n", (int)thread_id);
+						currentRow->closeSession();
+						close(socket);
+						pthread_exit(NULL);
 						break;
 					}
 				}
@@ -479,31 +536,54 @@ void * socket_thread(void *arg) {
 
 
 		// send message, if there is any
-		if(CurrentUser != "not-connected") // if the user has already connected
+		if(currentUser != "not-connected") // if the user has already connected
 		{
 			shared_reader_lock();
-			currentRow = master_table.find(CurrentUser)->second;
+			currentRow = master_table.find(currentUser)->second;
 			shared_reader_unlock();			
 
+			// TODO validar essa parte:
 			if(currentRow->hasNewNotification())
 			{
-				notification = currentRow->getNotification();
-				// snprintf(payload, PAYLOAD_SIZE, "%s", notification);
-				strcpy(payload, notification.c_str());
-				packet_to_send = create_packet(payload, 0);
-				serialize_packet(packet_to_send, buffer);
-				write_message(socket, buffer);
-
+				int activeSessions = currentRow->getActiveSessions();
+				// TODO mutex for the if
+				if(activeSessions == 1) {
+					// consume notification and remove it from the FIFO
+					notification = currentRow->popNotification();
+					strcpy(payload, notification.c_str());
+					packet_to_send = create_packet(payload, 0);
+					serialize_packet(packet_to_send, buffer);
+					write_message(socket, buffer);
+				} else if(activeSessions == 2) {
+					bool was_notification_delivered = currentRow->get_notification_delivered();
+					if(was_notification_delivered) {
+						// consume notification and remove it from the FIFO
+						notification = currentRow->popNotification();
+						strcpy(payload, notification.c_str());
+						packet_to_send = create_packet(payload, 0);
+						serialize_packet(packet_to_send, buffer);
+						write_message(socket, buffer);
+					} else {
+						// consume notification but DO NOT remove it from the FIFO
+						notification = currentRow->getNotification();
+						strcpy(payload, notification.c_str());
+						packet_to_send = create_packet(payload, 0);
+						serialize_packet(packet_to_send, buffer);
+						write_message(socket, buffer);
+						currentRow->set_notification_delivered(true);
+						// TODO wait for notification_delivered == false
+						bool timeout_condition = true;
+						std::time_t start_timestamp = std::time(nullptr);
+						while(currentRow->get_notification_delivered() == true && timeout_condition){
+							std::time_t loop_timestamp = std::time(nullptr);
+							bool timeout_condition = (loop_timestamp - start_timestamp <= 3);
+							// TODO ver se eh em segundos
+						}
+					}
+				}
 				// TODO receive ACK
 			}
 
-			// notification = currentRow->getNotification();
-			// if(notification != NULL){ // if there is a notification
-			// 	// send
-			// 	snprintf(payload, PAYLOAD_SIZE, "%s", notification);
-			// 	packet_to_send = create_packet(payload, 0);
-			// 	serialize_packet(packet_to_send, buffer);
-			// 	write_message(socket, buffer);
 
 			// 	// TODO receive ACK
 			// }

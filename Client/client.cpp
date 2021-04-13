@@ -38,6 +38,7 @@ typedef struct __packet{
         // 3 - MSG (username, message_sent, seqn)
         // 4 - ACK (seqn)
         // 5 - ERROR (seqn)
+        // 6 - DISCONNECT (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem
@@ -75,6 +76,9 @@ const char* get_packet_type_string(int packet_type)
   case 5:
     return "ERROR";
     break;
+  case 6:
+    return "DISCONNECT";
+    break;
   default:
     printf("ERROR: invalid packet type\n");
     return NULL;
@@ -108,6 +112,10 @@ int get_packet_type(char* packet_type_string)
   else if (strcmp(packet_type_string, "ERROR") == 0)
   {
     return 5;
+  }
+  else if (strcmp(packet_type_string, "DISCONNECT") == 0)
+  {
+    return 6;
   }
   else
   {
@@ -395,7 +403,21 @@ void * interface_thread(void *arg) {
   while(1){
     printf("Please enter your message:");
     bzero(user_input, PAYLOAD_SIZE);  
-    fgets(user_input, PAYLOAD_SIZE, stdin);
+
+    // interruption (signaling on ctrl+D)
+    if(fgets(user_input, PAYLOAD_SIZE, stdin) == NULL)
+    {
+      printf("Ending connection with server. Terminating client.\n");
+      // create DISCONNECT packet and put in the to_send FIFO
+      snprintf(payload, PAYLOAD_SIZE, " ");
+      packet_to_send = create_packet(payload, 6);
+      // put the packet in the FIFO queue
+      pthread_mutex_lock(&packets_to_send_mutex);
+      packets_to_send_fifo.push_back(packet_to_send);
+      pthread_mutex_unlock(&packets_to_send_mutex);
+      sleep(3);
+      exit(0);
+    }
 
     // parse user input
     rest = string_to_parse;
