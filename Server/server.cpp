@@ -16,6 +16,9 @@
 #include <map>
 #include <list>
 #include <pthread.h>
+#include <csignal>
+#include <algorithm>
+#include <iterator>
 
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -39,7 +42,7 @@ void shared_reader_unlock(){
 	pthread_mutex_unlock(&reader_mutex);
 }
 
-#define PORT 4001
+#define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
@@ -52,6 +55,10 @@ void shared_reader_unlock(){
 #define TYPE_ERROR 5
 
 int seqn = 0;
+
+// Global termination flag, set by the signal handler.
+// TODO add mutexes for get/set
+bool termination_signal = false;
 
 //-- Master table --
 class Row {
@@ -189,7 +196,7 @@ inline bool file_exists (const std::string& name) {
 // loads the master_table from a TXT file, if it exists
 master_table_t load_backup_table()
 {
-	char* line_ptr;
+	char* line_ptr_aux;
 	char* token;
 	Row* row;
 
@@ -201,23 +208,25 @@ master_table_t load_backup_table()
 		std::ifstream table_file("backup_table.txt");
 		for( std::string line; getline( table_file, line ); )
 		{
+			char* line_ptr = strdup(line.c_str());
+
 			row = new Row;
 			strcpy(line_ptr, line.c_str());
 
-			token = strtok_r(line_ptr, ".", &line_ptr);
+			token = strtok_r(line_ptr, ".", &line_ptr_aux);
 			std::string username(token);
 
-			token = strtok_r(line_ptr, ",", &line_ptr);
+			token = strtok_r(NULL, ",", &line_ptr_aux);
 			while(token != NULL)
 			{
 				std::string follower(token);
 				row->setAddNewFollower(follower);
-				token = strtok_r(line_ptr, ",", &line_ptr);
+				token = strtok_r(NULL, ",", &line_ptr_aux);
 			}
 
 			// insert new (usename, row) in master_table
 			pthread_mutex_lock(&read_write_mutex);
-			master_table.insert( std::make_pair( username, row) );
+			master_table.insert( std::make_pair(username, row) );
 			pthread_mutex_unlock(&read_write_mutex);
 		}
 		table_file.close(); 
@@ -288,7 +297,7 @@ int accept_connection(int sockfd)
 // serializes the packet and puts it in the buffer
 void serialize_packet(packet packet_to_send, char* buffer)
 {
-  bzero(buffer, sizeof(buffer));
+  bzero(buffer, BUFFER_SIZE * sizeof(char));
   snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
@@ -499,12 +508,18 @@ void * socket_thread(void *arg) {
 			// 	// TODO receive ACK
 			// }
 		}
-  	}while (1);
+  	}while (termination_signal == false);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	currentRow->closeSession();
 	close(socket);
 	pthread_exit(NULL);
+}
+
+void exit_hook_handler(int signal) {
+	std::cout<< std::endl << "Signal received: code is " << signal << std::endl;
+
+	termination_signal = true; //TODO mutex for set
 }
 
 int main(int argc, char *argv[])
@@ -517,7 +532,13 @@ int main(int argc, char *argv[])
   	char message[PAYLOAD_SIZE];
 	struct sockaddr_in serv_addr, cli_addr;
 	packet packet_to_send;
-  	pthread_t tid[MAX_THREADS];
+	std::list<pthread_t> threads_list;
+	pthread_t newthread;
+
+	// Install handler (assign handler to signal)
+    std::signal(SIGINT, exit_hook_handler);
+	std::signal(SIGTERM, exit_hook_handler);
+	std::signal(SIGABRT, exit_hook_handler);
 
 	// load backup table
 	master_table = load_backup_table();
@@ -533,10 +554,25 @@ int main(int argc, char *argv[])
 		
 		// If new incoming connection, accept. Then continue as normal.
 		if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
-			if (pthread_create(&tid[i], NULL, socket_thread, &newsockfd) != 0 ) {
+			if (pthread_create(&newthread, NULL, socket_thread, &newsockfd) != 0 ) {
 				printf("Failed to create thread\n");
 				exit(-1);
-			}	
+			} else {
+				threads_list.push_back(newthread);
+			}
+		}
+
+		// Cleanup code for main server thread
+		if(termination_signal == true) {
+			close(sockfd);
+			for (auto const& i : threads_list) {
+				pthread_join(i, NULL);
+			}
+
+			// TODO: free em tudo que foi alocado?
+
+			std::cout << "Exiting..." << std::endl;
+			exit(0);
 		}
 
 		sleep(1);

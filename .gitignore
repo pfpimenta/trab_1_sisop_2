@@ -2,6 +2,10 @@
 Client/client
 Server/server
 
+# Aux files
+compile_flags.txt
+vscode/*
+
 # Prerequisites
 *.d
 
