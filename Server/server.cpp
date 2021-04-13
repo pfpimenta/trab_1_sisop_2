@@ -17,6 +17,7 @@
 #include <list>
 #include <pthread.h>
 #include <algorithm>
+#include <ctime>
 
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -51,6 +52,7 @@ void shared_reader_unlock(){
 #define TYPE_MSG 3
 #define TYPE_ACK 4
 #define TYPE_ERROR 5
+#define TYPE_DISCONNECT 6
 
 int seqn = 0;
 
@@ -60,6 +62,7 @@ class Row {
 
 	protected:
 		int active_sessions;
+		bool notification_delivered;
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
 
@@ -67,6 +70,7 @@ class Row {
 		//constructor
 		Row(){
 			this->active_sessions = 0;
+			this->notification_delivered = false;
 		};
 
 		void startSession(){
@@ -86,7 +90,20 @@ class Row {
 			int num_active_sessions = this->active_sessions;
 			shared_reader_unlock();
 			return num_active_sessions;
-			}
+		}
+
+		bool get_notification_delivered(){
+			shared_reader_lock();
+			bool notification_delivered = this->notification_delivered;
+			shared_reader_unlock();
+			return notification_delivered;
+		}
+
+		void set_notification_delivered(bool was_notification_delivered){
+			pthread_mutex_lock(&read_write_mutex);
+			this->notification_delivered = was_notification_delivered;
+			pthread_mutex_unlock(&read_write_mutex);
+		}
 
 		std::list<std::string> getFollowers() {
 			shared_reader_lock();
@@ -134,14 +151,22 @@ class Row {
 		}
 
 		// removes a notification from the list and return it
-		std::string getNotification() {
+		std::string popNotification() {
 			shared_reader_lock();
 			std::string notification = this->messages_to_receive.front();
 			this->messages_to_receive.pop_front();
 			shared_reader_unlock();
+			this->set_notification_delivered(false);
 			return notification;
 		}
 
+		// returns a notification from the list
+		std::string getNotification() {
+			shared_reader_lock();
+			std::string notification = this->messages_to_receive.front();
+			shared_reader_unlock();
+			return notification;
+		}
 };
 typedef std::map< std::string, Row*> master_table_t;
 
@@ -157,6 +182,7 @@ typedef struct __packet{
         // 3 - MSG (username, message_sent, seqn)
         // 4 - ACK (seqn)
         // 5 - ERROR (seqn)
+        // 6 - DISCONNECT (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem
@@ -407,10 +433,13 @@ void * socket_thread(void *arg) {
 						shared_reader_lock();
 						currentRow = master_table.find(currentUser)->second;
 						shared_reader_unlock();
-						if(currentRow->getActiveSessions() >= 2){
+						int activeSessions = currentRow->getActiveSessions();
+						if(activeSessions >= 2){
 							printf("ERROR: there are already 2 active sessions!\n");
 							// TODO send ERROR packet to client
 							closeConnection(socket, (int)thread_id);
+						} else if (activeSessions == 1) {
+							currentRow->startSession();
 						} else {
 							currentRow->startSession();
 						}
@@ -476,6 +505,15 @@ void * socket_thread(void *arg) {
 						}
 						break;
 					}
+					case TYPE_DISCONNECT:
+					{
+						currentRow = master_table.find(currentUser)->second;
+						printf("Exiting socket thread: %d\n", (int)thread_id);
+						currentRow->closeSession();
+						close(socket);
+						pthread_exit(NULL);
+						break;
+					}
 				}
 				// send ACK
 				/*reference_seqn = 0; // TODO
@@ -496,25 +534,48 @@ void * socket_thread(void *arg) {
 			currentRow = master_table.find(currentUser)->second;
 			shared_reader_unlock();			
 
+			// TODO validar essa parte:
 			if(currentRow->hasNewNotification())
 			{
-				notification = currentRow->getNotification();
-				// snprintf(payload, PAYLOAD_SIZE, "%s", notification);
-				strcpy(payload, notification.c_str());
-				packet_to_send = create_packet(payload, 0);
-				serialize_packet(packet_to_send, buffer);
-				write_message(socket, buffer);
-
+				int activeSessions = currentRow->getActiveSessions();
+				// TODO mutex for the if
+				if(activeSessions == 1) {
+					// consume notification and remove it from the FIFO
+					notification = currentRow->popNotification();
+					strcpy(payload, notification.c_str());
+					packet_to_send = create_packet(payload, 0);
+					serialize_packet(packet_to_send, buffer);
+					write_message(socket, buffer);
+				} else if(activeSessions == 2) {
+					bool was_notification_delivered = currentRow->get_notification_delivered();
+					if(was_notification_delivered) {
+						// consume notification and remove it from the FIFO
+						notification = currentRow->popNotification();
+						strcpy(payload, notification.c_str());
+						packet_to_send = create_packet(payload, 0);
+						serialize_packet(packet_to_send, buffer);
+						write_message(socket, buffer);
+					} else {
+						// consume notification but DO NOT remove it from the FIFO
+						notification = currentRow->getNotification();
+						strcpy(payload, notification.c_str());
+						packet_to_send = create_packet(payload, 0);
+						serialize_packet(packet_to_send, buffer);
+						write_message(socket, buffer);
+						currentRow->set_notification_delivered(true);
+						// TODO wait for notification_delivered == false
+						bool timeout_condition = true;
+						std::time_t start_timestamp = std::time(nullptr);
+						while(currentRow->get_notification_delivered() == true && timeout_condition){
+							std::time_t loop_timestamp = std::time(nullptr);
+							bool timeout_condition = (loop_timestamp - start_timestamp <= 3);
+							// TODO ver se eh em segundos
+						}
+					}
+				}
 				// TODO receive ACK
 			}
 
-			// notification = currentRow->getNotification();
-			// if(notification != NULL){ // if there is a notification
-			// 	// send
-			// 	snprintf(payload, PAYLOAD_SIZE, "%s", notification);
-			// 	packet_to_send = create_packet(payload, 0);
-			// 	serialize_packet(packet_to_send, buffer);
-			// 	write_message(socket, buffer);
 
 			// 	// TODO receive ACK
 			// }
