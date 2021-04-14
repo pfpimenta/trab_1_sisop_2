@@ -314,6 +314,12 @@ int setup_socket()
         printf("ERROR creating LISTEN socket");
         exit(-1);
 	}
+
+	int enable = 1;
+	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+    	printf("setsockopt(SO_REUSEADDR) failed");
+	}
+
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(PORT);
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -386,11 +392,17 @@ void * socket_thread(void *arg) {
 	pthread_t thread_id = pthread_self();
 	printf("Socket opened in thread %d\n", (int)thread_id);
 
-	int flags = fcntl(socket, F_GETFL, 0);
-	if (flags == -1) printf("FAILED getting socket flags.\n");
-	flags = flags | O_NONBLOCK;
-	if (fcntl(socket, F_SETFL, flags) != 0) printf("FAILED setting socket to NON-BLOCKING mode.\n");
+	std::cout << "DEBUG: This thread is trying to use this socket: " << socket << std::endl;
 
+	int flags = fcntl(socket, F_GETFL);
+	if (flags == -1) {
+		printf("FAILED getting socket flags.\n");
+	}
+
+	flags = flags | O_NONBLOCK;
+	if (fcntl(socket, F_SETFL, flags) != 0) {
+		printf("FAILED setting socket to NON-BLOCKING mode.\n");
+	}
 	// zero-fill the buffer
 	bzero(client_message, sizeof(client_message));
 
@@ -661,8 +673,11 @@ int main(int argc, char *argv[])
 				exit(-1);
 			} else {
 				threads_list.push_back(newthread);
+				std::cout << "DEBUG: Spawned thread with ID " << (int)newthread << " should be using socket " << newsockfd << std::endl;
 			}
-		}
+		} /*else {
+			std::cout << "Failed accepting new incoming connection." << std::endl;
+		}*/
 
 		// Cleanup code for main server thread
 		if(get_termination_signal() == true) {
