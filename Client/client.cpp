@@ -1,5 +1,3 @@
-// codigo client_tcp.c fornecido pelo professor
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,9 +10,15 @@
 #include <semaphore.h>
 #include <fcntl.h>
 #include <list>
+#include <csignal>
+#include <iostream>
 
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
+
+// Global termination flag, set by the signal handler.
+// TODO add mutexes for get/set
+bool termination_signal = false;
 
 int seqn = 0;
 
@@ -368,11 +372,14 @@ void * communication_thread(void *arg) {
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
 
-	while(1){
+	while(termination_signal == false){
     communication_loop(socketfd);
   }
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
+  if (shutdown(socketfd, SHUT_RDWR) !=0 ) {
+    std::cout << "Failed to shutdown a connection socket." << std::endl;
+  }
 	close(socketfd);
 	pthread_exit(NULL);
 }
@@ -381,7 +388,6 @@ void * communication_thread(void *arg) {
 // function for the thread that gets user input
 // and puts it in the to_send FIFO queue
 void * interface_thread(void *arg) {
-	interface_params params = *((interface_params *)arg);
   char payload[PAYLOAD_SIZE];
   char user_input[PAYLOAD_SIZE];
   char string_to_parse[PAYLOAD_SIZE];
@@ -400,7 +406,7 @@ void * interface_thread(void *arg) {
 
   print_commands();
 
-  while(1){
+  while(termination_signal == false){
     printf("Please enter your message:");
     bzero(user_input, PAYLOAD_SIZE);  
 
@@ -415,82 +421,90 @@ void * interface_thread(void *arg) {
       pthread_mutex_lock(&packets_to_send_mutex);
       packets_to_send_fifo.push_back(packet_to_send);
       pthread_mutex_unlock(&packets_to_send_mutex);
-      sleep(3);
-      exit(0);
-    }
-
-    // parse user input
-    rest = string_to_parse;
-    strcpy(string_to_parse, user_input);
-	  parse_ptr = strtok_r(string_to_parse, delim, &rest);
-    if (strcmp(parse_ptr, "FOLLOW") == 0) 
-    {
-      user_input[strlen(user_input)-1] = 0; // remove '\n'
-      tail_ptr = &user_input[7]; // get username
-
-      printf("Sending a FOLLOW with payload: '%s'\n", tail_ptr);
-
-      // put the message in a packet
-      bzero(payload, sizeof(payload));
-      snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-      packet_to_send = create_packet(payload, 1);
-      
-      // put the packet in the FIFO queue
-      pthread_mutex_lock(&packets_to_send_mutex);
-      packets_to_send_fifo.push_back(packet_to_send);
-      pthread_mutex_unlock(&packets_to_send_mutex);
-    } else if (strcmp(parse_ptr, "SEND") == 0) {
-      user_input[strlen(user_input)-1] = 0; // remove '\n'
-      tail_ptr = &user_input[5]; // get message
-
-      printf("Sending a SEND with payload: '%s'\n", tail_ptr);
-
-      // put the message in a packet
-      bzero(payload, sizeof(payload));
-      snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-      packet_to_send = create_packet(payload, 2);
-      
-      // put the packet in the FIFO queue
-      pthread_mutex_lock(&packets_to_send_mutex);
-      packets_to_send_fifo.push_back(packet_to_send);
-      pthread_mutex_unlock(&packets_to_send_mutex);
-
-    } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {
-      pthread_mutex_lock(&packets_received_mutex);
-      num_notifications = packets_received_fifo.size();
-      pthread_mutex_unlock(&packets_received_mutex);
-      printf("\nPrinting %d new notifications...\n", num_notifications);
-      // prints received packets, if any
-      pthread_mutex_lock(&packets_received_mutex);
-      while(!packets_received_fifo.empty())
-      {
-        // get the packet
-        packet_received = packets_received_fifo.front();
-        packets_received_fifo.pop_front();
-
-        // print notification
-        printf("Notification: %s\n", packet_received._payload);
-        
-        // free malloc
-        free(packet_received._payload);
-      }
-      pthread_mutex_unlock(&packets_received_mutex);
-
+      termination_signal = true;
     } else {
-      printf("ERROR: did not recognize command: %s\n", parse_ptr);
+      // parse user input
+      rest = string_to_parse;
+      strcpy(string_to_parse, user_input);
+      parse_ptr = strtok_r(string_to_parse, delim, &rest);
+      if (strcmp(parse_ptr, "FOLLOW") == 0) 
+      {
+        user_input[strlen(user_input)-1] = 0; // remove '\n'
+        tail_ptr = &user_input[7]; // get username
+
+        printf("Sending a FOLLOW with payload: '%s'\n", tail_ptr);
+
+        // put the message in a packet
+        bzero(payload, sizeof(payload));
+        snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+        packet_to_send = create_packet(payload, 1);
+        
+        // put the packet in the FIFO queue
+        pthread_mutex_lock(&packets_to_send_mutex);
+        packets_to_send_fifo.push_back(packet_to_send);
+        pthread_mutex_unlock(&packets_to_send_mutex);
+      } else if (strcmp(parse_ptr, "SEND") == 0) {
+        user_input[strlen(user_input)-1] = 0; // remove '\n'
+        tail_ptr = &user_input[5]; // get message
+
+        printf("Sending a SEND with payload: '%s'\n", tail_ptr);
+
+        // put the message in a packet
+        bzero(payload, sizeof(payload));
+        snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+        packet_to_send = create_packet(payload, 2);
+        
+        // put the packet in the FIFO queue
+        pthread_mutex_lock(&packets_to_send_mutex);
+        packets_to_send_fifo.push_back(packet_to_send);
+        pthread_mutex_unlock(&packets_to_send_mutex);
+
+      } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {
+        pthread_mutex_lock(&packets_received_mutex);
+        num_notifications = packets_received_fifo.size();
+        pthread_mutex_unlock(&packets_received_mutex);
+        printf("\nPrinting %d new notifications...\n", num_notifications);
+        // prints received packets, if any
+        pthread_mutex_lock(&packets_received_mutex);
+        while(!packets_received_fifo.empty())
+        {
+          // get the packet
+          packet_received = packets_received_fifo.front();
+          packets_received_fifo.pop_front();
+
+          // print notification
+          printf("Notification: %s\n", packet_received._payload);
+          
+          // free malloc
+          free(packet_received._payload);
+        }
+        pthread_mutex_unlock(&packets_received_mutex);
+
+      } else {
+        printf("ERROR: did not recognize command: %s\n", parse_ptr);
+      }
     }
   }
-  sleep(1);
-  
+
 	printf("Exiting threads %d\n", (int)thread_id);
   pthread_exit(NULL);
+}
+
+void exit_hook_handler(int signal) {
+	std::cout<< std::endl << "Signal received: code is " << signal << std::endl;
+
+	termination_signal = true; //TODO mutex for set
 }
 
 int main(int argc, char*argv[])
 {
   communication_params communication_parameters;
-  interface_params interface_parameters;
   pthread_t communication_tid, interface_tid;
+
+  // Install handler (assign handler to signal)
+  std::signal(SIGINT, exit_hook_handler);
+  std::signal(SIGTERM, exit_hook_handler);
+  std::signal(SIGABRT, exit_hook_handler);
 
   // get arguments
   if (argc != 4) {
@@ -508,14 +522,14 @@ int main(int argc, char*argv[])
     exit(-1);
   }
   // create thread for the user interface
-  if (pthread_create(&interface_tid, NULL, interface_thread, &interface_parameters) != 0 ) {
+  if (pthread_create(&interface_tid, NULL, interface_thread, NULL) != 0 ) {
     printf("Failed to create thread\n");
     exit(-1);
   }
 
   // waits for both threads to end before exiting the program
   pthread_join(communication_tid, NULL);
-  pthread_join(interface_tid, NULL);
+  pthread_cancel(interface_tid);
 
-  return 0;
+  exit(0);
 }
