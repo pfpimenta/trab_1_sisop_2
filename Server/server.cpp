@@ -154,6 +154,8 @@ class Row {
 			std::time_t now_time = std::chrono::system_clock::to_time_t(now);
 			// first, generate payload string
 			std::string payload = std::string(std::ctime(&now_time)) + " @" + username + ": " + message;
+
+			std::cout << std::string(std::ctime(&now_time)) + " @" + username + ": " + message << std::endl;
 			// put payload in list
 			messages_to_receive.push_back(payload);
 			pthread_mutex_unlock(&read_write_mutex);
@@ -220,7 +222,6 @@ void save_backup_table()
 	Row* row;
 	std::ofstream table_file;
 	table_file.open ("backup_table.txt", std::ios::out | std::ios::trunc); 
-	// TODO precisa de um lock aqui? tem q ver como botar sem dar conflito com getFollowers
 	for(auto const& x : master_table)
 	{	
 		username = x.first;
@@ -254,7 +255,7 @@ master_table_t load_backup_table()
 	// if file exists
 	if(file_exists("backup_table.txt"))
 	{
-		printf("Loading backup table... \n");
+		printf("Restoring backup... \n");
 		fflush(stdout);
 		std::ifstream table_file("backup_table.txt");
 		for( std::string line; getline( table_file, line ); )
@@ -395,12 +396,6 @@ void * socket_thread(void *arg) {
 
 	// print pthread id
 	pthread_t thread_id = pthread_self();
-	printf("Socket opened in thread %d\n", (int)thread_id);
-
-	std::cout << "DEBUG: This thread is trying to use this socket: " << socket << std::endl;
-	std::cout << "DEBUG: arg: " << arg << std::endl;
-	int arg_deref = *(int*)arg;
-	std::cout << "DEBUG: arg_deref: " << arg_deref << std::endl;
 
 	int flags = fcntl(socket, F_GETFL);
 	if (flags == -1) {
@@ -421,15 +416,12 @@ void * socket_thread(void *arg) {
 			memset(payload, 0, sizeof payload); //clear payload buffer
 
 			client_message[size] = '\0';
-			printf("Thread %d - Read buffer: %s (size: %d)\n", (int)thread_id, client_message, (int)size);
-			fflush(stdout);
 
 			// parse socket buffer: get several messages, if there are more than one
 			char* token_end_of_packet;
   			char* rest_packet = client_message;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
-
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				char* token;
 				char* rest = buffer;
@@ -451,9 +443,6 @@ void * socket_thread(void *arg) {
 				token = strtok_r(rest, "\n", &rest);
 				strncpy(payload, token, payload_length);
 
-				printf(" Reference seqn: %i \n Payload length: %i \n Packet type: %i \n Payload: %s \n", reference_seqn, payload_length, message_type, payload);
-				fflush(stdout);
-
 				switch (message_type) {
 					case TYPE_CONNECT:
 					{
@@ -473,6 +462,7 @@ void * socket_thread(void *arg) {
 							save_backup_table();
 						}
 
+						std::cout << "User " + currentUser + " is connecting...";
 
 						// checks if there are already 2 open sessions for this user
 						shared_reader_lock();
@@ -480,13 +470,11 @@ void * socket_thread(void *arg) {
 						shared_reader_unlock();
 						int activeSessions = currentRow->getActiveSessions();
 						if(activeSessions >= 2){
-							printf("ERROR: there are already 2 active sessions!\n");
-							// TODO send ERROR packet to client
+							printf("\n denied: there are already 2 active sessions!\n");
 							closeConnection(socket, (int)thread_id);
-						} else if (activeSessions == 1) {
-							currentRow->startSession();
 						} else {
 							currentRow->startSession();
+							std::cout << " connected." << std::endl;
 						}
 						break;
 					}
@@ -512,16 +500,13 @@ void * socket_thread(void *arg) {
 							shared_reader_unlock();
 							if(notDuplicateFollowing) {
 								followingRow->setAddNewFollower(currentUser);
+								std::cout << currentUser + " is now following " + newFollowingUsername + "." << std::endl;
 							} else {
-								printf("ERROR: client user is already following this other user!\n");
-								fflush(stdout);
-								// TODO send ERROR packet to client
+								std::cout << currentUser + " is already following " + newFollowingUsername + "." << std::endl;
 							}
 							save_backup_table();
 						} else {
-							printf("ERROR: one of the users does not exist OR user tried to follow himself!\n");
-							fflush(stdout);
-							// TODO send ERROR packet to client
+							std::cout << currentUser + " is trying to follow " + newFollowingUsername + " but either user does not exist or " + currentUser + " is trying to follow himself." << std::endl;
 						}
 						break;
 					}
@@ -553,24 +538,16 @@ void * socket_thread(void *arg) {
 					case TYPE_DISCONNECT:
 					{
 						currentRow = master_table.find(currentUser)->second;
-						printf("Exiting socket thread: %d\n", (int)thread_id);
 						currentRow->closeSession();
+						std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
 						if (shutdown(socket, SHUT_RDWR) !=0 ) {
-							std::cout << "Failed to shutdown a connection socket." << std::endl;
+							std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
 						}
 						close(socket);
 						pthread_exit(NULL);
 						break;
 					}
 				}
-				// send ACK
-				/*reference_seqn = 0; // TODO
-				bzero(payload, sizeof(payload));
-				snprintf(payload, PAYLOAD_SIZE, "%d", reference_seqn);
-				packet_to_send = create_packet(payload, 4);
-				serialize_packet(packet_to_send, reply);
-				printf("Thread %d - Sending message: %s\n", (int)thread_id, reply);
-				write_message(socket, reply);*/
 			}
 		}
 
@@ -581,11 +558,9 @@ void * socket_thread(void *arg) {
 			currentRow = master_table.find(currentUser)->second;
 			shared_reader_unlock();			
 
-			// TODO validar essa parte:
 			if(currentRow->hasNewNotification())
 			{
 				int activeSessions = currentRow->getActiveSessions();
-				// TODO mutex for the if
 				if(activeSessions == 1) {
 					// consume notification and remove it from the FIFO
 					notification = currentRow->popNotification();
@@ -610,22 +585,15 @@ void * socket_thread(void *arg) {
 						serialize_packet(packet_to_send, buffer);
 						write_message(socket, buffer);
 						currentRow->set_notification_delivered(true);
-						// TODO wait for notification_delivered == false
 						bool timeout_condition = true;
 						std::time_t start_timestamp = std::time(nullptr);
 						while(currentRow->get_notification_delivered() == true && timeout_condition){
 							std::time_t loop_timestamp = std::time(nullptr);
 							bool timeout_condition = (loop_timestamp - start_timestamp <= 3);
-							// TODO ver se eh em segundos
 						}
 					}
 				}
-				// TODO receive ACK
 			}
-
-
-			// 	// TODO receive ACK
-			// }
 		}
   	}while (get_termination_signal() == false);
 
@@ -669,7 +637,7 @@ int main(int argc, char *argv[])
 
 	// setup LISTEN socket
     sockfd = setup_socket();
-	printf("LISTEN socket open and ready. \n");
+	printf("Now listening for incoming connections... \n\n");
 
 	clilen = sizeof(struct sockaddr_in);
 
@@ -692,16 +660,13 @@ int main(int argc, char *argv[])
 			} else {
 				threads_list.push_back(newthread);
 				socketptrs_list.push_back(newsockptr);
-				std::cout << "DEBUG: Spawned thread with ID " << (int)newthread << " should be using socket " << newsockfd << " = " << *newsockptr << std::endl;
 			}
-		} /*else {
-			std::cout << "Failed accepting new incoming connection." << std::endl;
-		}*/
+		}
 
 		// Cleanup code for main server thread
 		if(get_termination_signal() == true) {
 			std::cout << "Server is now gracefully shutting down..." << std::endl;
-			std::cout << "Closing main LISTEN socket..." << std::endl;
+			std::cout << "Closing passive socket..." << std::endl;
 			if (shutdown(sockfd, SHUT_RDWR) !=0 ) {
 				std::cout << "Failed to shutdown a connection socket." << std::endl;
 			}
@@ -715,7 +680,7 @@ int main(int argc, char *argv[])
 				free(i);
 			}
 
-			std::cout << "Freeing allocated Rows..." << std::endl;
+			std::cout << "Deleting instantiated objects..." << std::endl;
 			for (auto const& x : master_table) {
 				delete(x.second);
 			}

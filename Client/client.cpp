@@ -12,9 +12,18 @@
 #include <list>
 #include <csignal>
 #include <iostream>
+#include <poll.h>
 
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
+
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -44,7 +53,6 @@ typedef struct __communication_params{
   int port;
 } communication_params;
 
-// TODO : put in another file
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
         // 0 - CONNECT (username_to_login, seqn)
@@ -60,7 +68,6 @@ typedef struct __packet{
 } packet;
 
 
-// TODO put somewhere else
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
 
@@ -197,30 +204,6 @@ void serialize_packet(packet packet_to_send, char* buffer)
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
 
-// asks the user to write a message and then sends it to the server
-int send_user_message(int socketfd)
-{
-  packet packet_to_send;
-  char buffer[BUFFER_SIZE];
-  char message[PAYLOAD_SIZE];
-
-  printf("\nPlease enter your message:");
-  bzero(message, sizeof(message));  
-  fgets(message, PAYLOAD_SIZE, stdin);
-  message[strlen(message)-1] = 0; // remove '\n'
-  packet_to_send = create_packet(message, 3);
-  serialize_packet(packet_to_send, buffer);
-  printf("Sending to server: %s\n",buffer);
-  int n = write(socketfd, buffer, strlen(buffer));
-  if (n < 0) 
-  {
-    printf("ERROR writing to socket\n");
-    return 0;
-  }
-  else
-    return 1;
-}
-
 // writes a message in a socket (sends a message through it)
 void write_message(int socketfd, char* message)
 {
@@ -286,16 +269,7 @@ void send_connect_message(int socketfd, char* profile_name)
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
 
-  // /* read ACK from the socket */
-  // read_message(socketfd, buffer);
-  // sleep(1);
-  // fflush(stdout);
-
-  // printf("Received message: %s\n", buffer);
-  // sleep(1);
-  // fflush(stdout);
-
-  sleep(3);
+  sleep(1);
 }
 
 void send_follow_message(int socketfd, char* profile_name)
@@ -308,15 +282,6 @@ void send_follow_message(int socketfd, char* profile_name)
   packet_to_send = create_packet(payload, 1);
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
-
-  // /* read ACK from the socket */
-  // read_message(socketfd, buffer);
-  // sleep(1);
-  // fflush(stdout);
-
-  // printf("Received message: %s\n", buffer);
-  // sleep(1);
-  // fflush(stdout);
 }
 
 void print_commands()
@@ -324,7 +289,6 @@ void print_commands()
   printf("\nCommands:");
   printf("\n - SEND: to send a message to all followers.\n    usage: \'SEND message\'");
   printf("\n - FOLLOW: to follow another user.\n    usage: \'FOLLOW username\'");
-  printf("\n - NOTIFICATIONS: to show received notifications.\n    usage: \'NOTIFICATIONS\'");
   printf("\n\n");
   fflush(stdout);
 }
@@ -365,13 +329,13 @@ void communication_loop(int socketfd)
       pthread_mutex_unlock(&packets_to_send_mutex);
     } while (get_termination_signal() == false);
 
-    printf("Ending connection with server. Terminating client.\n");
+    printf("\nClosing server connection...\nTerminating client....\n");
     // Send a DISCONNECT packet
     snprintf(payload, PAYLOAD_SIZE, " ");
     packet = create_packet(payload, 6);
     serialize_packet(packet, buffer);
     write_message(socketfd, buffer);
-    sleep(3);
+    sleep(1);
 }
 
 // function for the thread that
@@ -383,7 +347,6 @@ void * communication_thread(void *arg) {
 
   // print pthread id
 	pthread_t thread_id = pthread_self();
-	printf("Started thread %d\n", (int)thread_id);
 
   // setup socket and send CONNECT message
   socketfd = setup_socket(params);
@@ -393,7 +356,7 @@ void * communication_thread(void *arg) {
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
   if (shutdown(socketfd, SHUT_RDWR) !=0 ) {
-    std::cout << "Failed to shutdown a connection socket." << std::endl;
+    std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
   }
 	close(socketfd);
 	pthread_exit(NULL);
@@ -417,82 +380,83 @@ void * interface_thread(void *arg) {
 
   // print pthread id
 	pthread_t thread_id = pthread_self();
-	printf("Started thread %d\n", (int)thread_id);
 
   print_commands();
 
+  printf("> "); fflush(stdout);
+
+  struct pollfd stdin_poll = { .fd = STDIN_FILENO
+                           , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
+
   while(get_termination_signal() == false){
-    printf("Please enter your message:");
     bzero(user_input, PAYLOAD_SIZE);  
 
-    // interruption (signaling on ctrl+D)
-    if(fgets(user_input, PAYLOAD_SIZE, stdin) == NULL) {
+    if (poll(&stdin_poll, 1, 0) == 1) {
+      /* Data waiting on stdin. Process it. */
+      
+      if(fgets(user_input, PAYLOAD_SIZE, stdin) == NULL) {
 
-      // ctrl+D detected
-      set_termination_signal(true);
-    
-    } else {
-      // parse user input
-      rest = string_to_parse;
-      strcpy(string_to_parse, user_input);
-      parse_ptr = strtok_r(string_to_parse, delim, &rest);
-      if (strcmp(parse_ptr, "FOLLOW") == 0) 
-      {
-        user_input[strlen(user_input)-1] = 0; // remove '\n'
-        tail_ptr = &user_input[7]; // get username
-
-        printf("Sending a FOLLOW with payload: '%s'\n", tail_ptr);
-
-        // put the message in a packet
-        bzero(payload, sizeof(payload));
-        snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-        packet_to_send = create_packet(payload, 1);
-        
-        // put the packet in the FIFO queue
-        pthread_mutex_lock(&packets_to_send_mutex);
-        packets_to_send_fifo.push_back(packet_to_send);
-        pthread_mutex_unlock(&packets_to_send_mutex);
-      } else if (strcmp(parse_ptr, "SEND") == 0) {
-        user_input[strlen(user_input)-1] = 0; // remove '\n'
-        tail_ptr = &user_input[5]; // get message
-
-        printf("Sending a SEND with payload: '%s'\n", tail_ptr);
-
-        // put the message in a packet
-        bzero(payload, sizeof(payload));
-        snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-        packet_to_send = create_packet(payload, 2);
-        
-        // put the packet in the FIFO queue
-        pthread_mutex_lock(&packets_to_send_mutex);
-        packets_to_send_fifo.push_back(packet_to_send);
-        pthread_mutex_unlock(&packets_to_send_mutex);
-
-      } else if (strcmp(string_to_parse, "NOTIFICATIONS\n") == 0) {
-        pthread_mutex_lock(&packets_received_mutex);
-        num_notifications = packets_received_fifo.size();
-        pthread_mutex_unlock(&packets_received_mutex);
-        printf("\nPrinting %d new notifications...\n", num_notifications);
-        // prints received packets, if any
-        pthread_mutex_lock(&packets_received_mutex);
-        while(!packets_received_fifo.empty())
-        {
-          // get the packet
-          packet_received = packets_received_fifo.front();
-          packets_received_fifo.pop_front();
-
-          // print notification
-          printf("Notification: %s\n", packet_received._payload);
-          
-          // free malloc TODO fix this
-          //free(packet_received._payload);
-        }
-        pthread_mutex_unlock(&packets_received_mutex);
-
+        // ctrl+D detected
+        set_termination_signal(true);
+      
       } else {
-        printf("ERROR: did not recognize command: %s\n", parse_ptr);
+        // parse user input
+        rest = string_to_parse;
+        strcpy(string_to_parse, user_input);
+        parse_ptr = strtok_r(string_to_parse, delim, &rest);
+        if (strcmp(parse_ptr, "FOLLOW") == 0) 
+        {
+          user_input[strlen(user_input)-1] = 0; // remove '\n'
+          tail_ptr = &user_input[7]; // get username
+
+          // put the message in a packet
+          bzero(payload, sizeof(payload));
+          snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+          packet_to_send = create_packet(payload, 1);
+          
+          // put the packet in the FIFO queue
+          pthread_mutex_lock(&packets_to_send_mutex);
+          packets_to_send_fifo.push_back(packet_to_send);
+          pthread_mutex_unlock(&packets_to_send_mutex);
+        } else if (strcmp(parse_ptr, "SEND") == 0) {
+          user_input[strlen(user_input)-1] = 0; // remove '\n'
+          tail_ptr = &user_input[5]; // get message
+
+          // put the message in a packet
+          bzero(payload, sizeof(payload));
+          snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
+          packet_to_send = create_packet(payload, 2);
+          
+          // put the packet in the FIFO queue
+          pthread_mutex_lock(&packets_to_send_mutex);
+          packets_to_send_fifo.push_back(packet_to_send);
+          pthread_mutex_unlock(&packets_to_send_mutex);
+
+        } else {
+          printf("ERROR: did not recognize command: %s\n", parse_ptr);
+        }
+
+        printf("> "); fflush(stdout);
+
       }
     }
+    
+    /* Do other processing: check for incoming packets */
+    pthread_mutex_lock(&packets_received_mutex);
+    while(!packets_received_fifo.empty())
+    {
+      // get the packet
+      packet_received = packets_received_fifo.front();
+      packets_received_fifo.pop_front();
+
+      // print notification
+      printf("Notification: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload);
+
+      printf("\n> "); fflush(stdout);
+      
+    }
+    pthread_mutex_unlock(&packets_received_mutex);
+
   }
 
 	printf("Exiting threads %d\n", (int)thread_id);
