@@ -1,23 +1,25 @@
+#include <algorithm>
+#include <chrono>
+#include <csignal>
+#include <ctime>
+#include <fcntl.h>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <list>
+#include <map>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <string>
-#include <sys/types.h> 
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <utility>
-#include <iostream>
-#include <fstream>
-#include <map>
-#include <list>
-#include <pthread.h>
-#include <csignal>
-#include <algorithm>
-#include <iterator>
-#include <ctime>
+
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -147,8 +149,11 @@ class Row {
 
 		void addNotification(std::string username, std::string message) {
 			pthread_mutex_lock(&read_write_mutex);
+
+			auto now = std::chrono::system_clock::now();
+			std::time_t now_time = std::chrono::system_clock::to_time_t(now);
 			// first, generate payload string
-			std::string payload = "@" + username + ": " + message;
+			std::string payload = std::string(std::ctime(&now_time)) + " @" + username + ": " + message;
 			// put payload in list
 			messages_to_receive.push_back(payload);
 			pthread_mutex_unlock(&read_write_mutex);
@@ -705,9 +710,14 @@ int main(int argc, char *argv[])
 				pthread_join(i, NULL);
 			}
 
-			std::cout << "Freeing allocated memory..." << std::endl;
+			std::cout << "Freeing allocated socket pointers memory..." << std::endl;
 			for (auto const& i : socketptrs_list) {
 				free(i);
+			}
+
+			std::cout << "Freeing allocated Rows..." << std::endl;
+			for (auto const& x : master_table) {
+				delete(x.second);
 			}
 
 			std::cout << "Shutdown routine successfully completed." << std::endl;

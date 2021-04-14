@@ -192,7 +192,7 @@ packet buffer_to_packet(char* buffer){
 // serializes the packet and puts it in the buffer
 void serialize_packet(packet packet_to_send, char* buffer)
 {
-  bzero(buffer, sizeof(buffer));
+  memset(buffer, 0, BUFFER_SIZE * sizeof(char));
   snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
@@ -335,33 +335,43 @@ void communication_loop(int socketfd)
     char payload[PAYLOAD_SIZE];
     packet packet;
 
-		// se tem mensagem recebida, prints it to the client
-    bzero(buffer, BUFFER_SIZE);
-    int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
-    if(size > 0) //(size != -1)
-    {
-      //put the message in a packet
-      packet = buffer_to_packet(buffer);
-      // put the packet in the received FIFO
-      pthread_mutex_lock(&packets_received_mutex);
-      packets_received_fifo.push_back(packet);
-      pthread_mutex_unlock(&packets_received_mutex);
-    }
+		do {
+      // se tem mensagem recebida, prints it to the client
+      memset(buffer, 0, sizeof buffer);
+      int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+      if(size > 0) //(size != -1)
+      {
+        //put the message in a packet
+        packet = buffer_to_packet(buffer);
+        // put the packet in the received FIFO
+        pthread_mutex_lock(&packets_received_mutex);
+        packets_received_fifo.push_back(packet);
+        pthread_mutex_unlock(&packets_received_mutex);
+      }
 
-    // send packet to server, if there is any
-    pthread_mutex_lock(&packets_to_send_mutex);
-    if(!packets_to_send_fifo.empty())
-		{
-      // get the packet
-      packet = packets_to_send_fifo.front();
-			packets_to_send_fifo.pop_front();
+      // send packet to server, if there is any
+      pthread_mutex_lock(&packets_to_send_mutex);
+      if(!packets_to_send_fifo.empty())
+      {
+        // get the packet
+        packet = packets_to_send_fifo.front();
+        packets_to_send_fifo.pop_front();
 
-      // serialize and send the packet
-      serialize_packet(packet, buffer);
-      write_message(socketfd, buffer);
-    }
-    pthread_mutex_unlock(&packets_to_send_mutex);
+        // serialize and send the packet
+        serialize_packet(packet, buffer);
 
+        write_message(socketfd, buffer);
+      }
+      pthread_mutex_unlock(&packets_to_send_mutex);
+    } while (get_termination_signal() == false);
+
+    printf("Ending connection with server. Terminating client.\n");
+    // Send a DISCONNECT packet
+    snprintf(payload, PAYLOAD_SIZE, " ");
+    packet = create_packet(payload, 6);
+    serialize_packet(packet, buffer);
+    write_message(socketfd, buffer);
+    sleep(3);
 }
 
 // function for the thread that
@@ -379,10 +389,7 @@ void * communication_thread(void *arg) {
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
 
-  
-	while(get_termination_signal() == false){
-    communication_loop(socketfd);
-  }
+  communication_loop(socketfd);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
   if (shutdown(socketfd, SHUT_RDWR) !=0 ) {
@@ -419,17 +426,11 @@ void * interface_thread(void *arg) {
     bzero(user_input, PAYLOAD_SIZE);  
 
     // interruption (signaling on ctrl+D)
-    if(fgets(user_input, PAYLOAD_SIZE, stdin) == NULL)
-    {
-      printf("Ending connection with server. Terminating client.\n");
-      // create DISCONNECT packet and put in the to_send FIFO
-      snprintf(payload, PAYLOAD_SIZE, " ");
-      packet_to_send = create_packet(payload, 6);
-      // put the packet in the FIFO queue
-      pthread_mutex_lock(&packets_to_send_mutex);
-      packets_to_send_fifo.push_back(packet_to_send);
-      pthread_mutex_unlock(&packets_to_send_mutex);
+    if(fgets(user_input, PAYLOAD_SIZE, stdin) == NULL) {
+
+      // ctrl+D detected
       set_termination_signal(true);
+    
     } else {
       // parse user input
       rest = string_to_parse;
@@ -483,8 +484,8 @@ void * interface_thread(void *arg) {
           // print notification
           printf("Notification: %s\n", packet_received._payload);
           
-          // free malloc
-          free(packet_received._payload);
+          // free malloc TODO fix this
+          //free(packet_received._payload);
         }
         pthread_mutex_unlock(&packets_received_mutex);
 
@@ -534,8 +535,10 @@ int main(int argc, char*argv[])
     exit(-1);
   }
 
-  // waits for both threads to end before exiting the program
+  // wait for communication thread to finish before exiting the program
   pthread_join(communication_tid, NULL);
+
+  // terminate interface thread
   pthread_cancel(interface_tid);
 
   exit(0);
