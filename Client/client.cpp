@@ -388,7 +388,6 @@ void * communication_thread(void *arg) {
 // function for the thread that gets user input
 // and puts it in the to_send FIFO queue
 void * interface_thread(void *arg) {
-	interface_params params = *((interface_params *)arg);
   char payload[PAYLOAD_SIZE];
   char user_input[PAYLOAD_SIZE];
   char string_to_parse[PAYLOAD_SIZE];
@@ -500,7 +499,6 @@ void exit_hook_handler(int signal) {
 int main(int argc, char*argv[])
 {
   communication_params communication_parameters;
-  interface_params interface_parameters;
   pthread_t communication_tid, interface_tid;
 
   // Install handler (assign handler to signal)
@@ -524,7 +522,7 @@ int main(int argc, char*argv[])
     exit(-1);
   }
   // create thread for the user interface
-  if (pthread_create(&interface_tid, NULL, interface_thread, &interface_parameters) != 0 ) {
+  if (pthread_create(&interface_tid, NULL, interface_thread, NULL) != 0 ) {
     printf("Failed to create thread\n");
     exit(-1);
   }
