@@ -1,5 +1,3 @@
-// codigo server_tcp.c fornecido pelo professor
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -542,7 +540,6 @@ void * socket_thread(void *arg) {
 				write_message(socket, reply);*/
 			}
 		}
-
 
 		// send message, if there is any
 		if(currentUser != "not-connected") // if the user has already connected
