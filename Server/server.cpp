@@ -19,6 +19,7 @@
 #include <iterator>
 #include <ctime>
 
+pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
 int reader_counter = 0;
@@ -57,8 +58,20 @@ void shared_reader_unlock(){
 int seqn = 0;
 
 // Global termination flag, set by the signal handler.
-// TODO add mutexes for get/set
 bool termination_signal = false;
+
+bool get_termination_signal(){
+  pthread_mutex_lock(&termination_signal_mutex);
+  bool signal = termination_signal;
+  pthread_mutex_unlock(&termination_signal_mutex);
+  return signal;
+}
+
+void set_termination_signal(){
+  pthread_mutex_lock(&termination_signal_mutex);
+  termination_signal = true;
+  pthread_mutex_unlock(&termination_signal_mutex);
+}
 
 //-- Master table --
 class Row {
@@ -609,7 +622,7 @@ void * socket_thread(void *arg) {
 			// 	// TODO receive ACK
 			// }
 		}
-  	}while (termination_signal == false);
+  	}while (get_termination_signal() == false);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	currentRow->closeSession();
@@ -623,7 +636,7 @@ void * socket_thread(void *arg) {
 void exit_hook_handler(int signal) {
 	std::cout<< std::endl << "Signal received: code is " << signal << std::endl;
 
-	termination_signal = true; //TODO mutex for set
+	set_termination_signal();
 }
 
 int main(int argc, char *argv[])
@@ -681,10 +694,10 @@ int main(int argc, char *argv[])
 		}*/
 
 		// Cleanup code for main server thread
-		if(termination_signal == true) {
+		if(get_termination_signal() == true) {
 			std::cout << "Server is now gracefully shutting down..." << std::endl;
 			std::cout << "Closing main LISTEN socket..." << std::endl;
-			if (shutdown(sockfd, SHUT_RDWR) != 0 ) {
+			if (shutdown(sockfd, SHUT_RDWR) !=0 ) {
 				std::cout << "Failed to shutdown a connection socket." << std::endl;
 			}
 			close(sockfd);

@@ -16,9 +16,25 @@
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
+pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t packets_received_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Global termination flag, set by the signal handler.
-// TODO add mutexes for get/set
 bool termination_signal = false;
+
+bool get_termination_signal(){
+  pthread_mutex_lock(&termination_signal_mutex);
+  bool signal = termination_signal;
+  pthread_mutex_unlock(&termination_signal_mutex);
+  return signal;
+}
+
+void set_termination_signal(bool new_signal_value){
+  pthread_mutex_lock(&termination_signal_mutex);
+  termination_signal = new_signal_value;
+  pthread_mutex_unlock(&termination_signal_mutex);
+}
 
 int seqn = 0;
 
@@ -27,11 +43,6 @@ typedef struct __communication_params{
   char* server_ip_address;
   int port;
 } communication_params;
-
-typedef struct __interface_params{
-  int messages_to_send; // TODO mudar tipo
-  int received_notifications; // TODO mudar tipo
-} interface_params;
 
 // TODO : put in another file
 typedef struct __packet{
@@ -50,12 +61,8 @@ typedef struct __packet{
 
 
 // TODO put somewhere else
-// TODO Mutex
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
-
-pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t packets_received_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 const char* get_packet_type_string(int packet_type)
@@ -372,7 +379,8 @@ void * communication_thread(void *arg) {
   socketfd = setup_socket(params);
   send_connect_message(socketfd, params.profile_name);
 
-	while(termination_signal == false){
+  
+	while(get_termination_signal() == false){
     communication_loop(socketfd);
   }
 
@@ -406,7 +414,7 @@ void * interface_thread(void *arg) {
 
   print_commands();
 
-  while(termination_signal == false){
+  while(get_termination_signal() == false){
     printf("Please enter your message:");
     bzero(user_input, PAYLOAD_SIZE);  
 
@@ -421,7 +429,7 @@ void * interface_thread(void *arg) {
       pthread_mutex_lock(&packets_to_send_mutex);
       packets_to_send_fifo.push_back(packet_to_send);
       pthread_mutex_unlock(&packets_to_send_mutex);
-      termination_signal = true;
+      set_termination_signal(true);
     } else {
       // parse user input
       rest = string_to_parse;
@@ -492,8 +500,7 @@ void * interface_thread(void *arg) {
 
 void exit_hook_handler(int signal) {
 	std::cout<< std::endl << "Signal received: code is " << signal << std::endl;
-
-	termination_signal = true; //TODO mutex for set
+  set_termination_signal(true);
 }
 
 int main(int argc, char*argv[])
