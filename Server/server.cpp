@@ -380,6 +380,9 @@ void * socket_thread(void *arg) {
 	printf("Socket opened in thread %d\n", (int)thread_id);
 
 	std::cout << "DEBUG: This thread is trying to use this socket: " << socket << std::endl;
+	std::cout << "DEBUG: arg: " << arg << std::endl;
+	int arg_deref = *(int*)arg;
+	std::cout << "DEBUG: arg_deref: " << arg_deref << std::endl;
 
 	int flags = fcntl(socket, F_GETFL);
 	if (flags == -1) {
@@ -391,13 +394,13 @@ void * socket_thread(void *arg) {
 		printf("FAILED setting socket to NON-BLOCKING mode.\n");
 	}
 	// zero-fill the buffer
-	bzero(client_message, sizeof(client_message));
+	memset(client_message, 0, sizeof client_message);
 
 	do{
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+			memset(payload, 0, sizeof payload); //clear payload buffer
 
 			client_message[size] = '\0';
 			printf("Thread %d - Read buffer: %s (size: %d)\n", (int)thread_id, client_message, (int)size);
@@ -628,6 +631,7 @@ int main(int argc, char *argv[])
 	int i = 0;
 	int sockfd;
 	int newsockfd;
+	int* newsockptr;
 	socklen_t clilen;
 	char buffer[BUFFER_SIZE];
   	char message[PAYLOAD_SIZE];
@@ -635,6 +639,7 @@ int main(int argc, char *argv[])
 	packet packet_to_send;
 	std::list<pthread_t> threads_list;
 	pthread_t newthread;
+	std::list<int*> socketptrs_list;
 
 	// Install handler (assign handler to signal)
     std::signal(SIGINT, exit_hook_handler);
@@ -655,12 +660,21 @@ int main(int argc, char *argv[])
 		
 		// If new incoming connection, accept. Then continue as normal.
 		if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
-			if (pthread_create(&newthread, NULL, socket_thread, &newsockfd) != 0 ) {
+			
+			if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
+				std::cout << "Failed to allocate enough memory for the newsockptr." << std::endl;
+				exit(-1);
+			}	
+			
+			*newsockptr = newsockfd;
+			
+			if (pthread_create(&newthread, NULL, socket_thread, newsockptr) != 0 ) {
 				printf("Failed to create thread\n");
 				exit(-1);
 			} else {
 				threads_list.push_back(newthread);
-				std::cout << "DEBUG: Spawned thread with ID " << (int)newthread << " should be using socket " << newsockfd << std::endl;
+				socketptrs_list.push_back(newsockptr);
+				std::cout << "DEBUG: Spawned thread with ID " << (int)newthread << " should be using socket " << newsockfd << " = " << *newsockptr << std::endl;
 			}
 		} /*else {
 			std::cout << "Failed accepting new incoming connection." << std::endl;
@@ -668,6 +682,8 @@ int main(int argc, char *argv[])
 
 		// Cleanup code for main server thread
 		if(termination_signal == true) {
+			std::cout << "Server is now gracefully shutting down..." << std::endl;
+			std::cout << "Closing main LISTEN socket..." << std::endl;
 			if (shutdown(sockfd, SHUT_RDWR) != 0 ) {
 				std::cout << "Failed to shutdown a connection socket." << std::endl;
 			}
@@ -676,9 +692,12 @@ int main(int argc, char *argv[])
 				pthread_join(i, NULL);
 			}
 
-			// TODO: free em tudo que foi alocado?
+			std::cout << "Freeing allocated memory..." << std::endl;
+			for (auto const& i : socketptrs_list) {
+				free(i);
+			}
 
-			std::cout << "Exiting..." << std::endl;
+			std::cout << "Shutdown routine successfully completed." << std::endl;
 			exit(0);
 		}
 	}
