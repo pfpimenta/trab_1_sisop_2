@@ -1,9 +1,8 @@
-# trab_1_sisop_2
-Trabalho Prático 1 da disciplina de Sistemas Operacionais 2 (UFRGS) no semestre 2020/2 (que excepcionalmente se passa em 2021).
+# trab_sisop_2
+Trabalho Prático da disciplina de Sistemas Operacionais 2 (UFRGS) no semestre 2020/2 (que excepcionalmente se passa em 2021).
 
 ## Integrantes do grupo
 - André Carini
-- Lucas Assis
 - Pedro Foletto Pimenta
 - Roberta Robert
 
