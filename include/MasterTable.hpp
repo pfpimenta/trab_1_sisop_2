@@ -9,7 +9,10 @@
 #include <iomanip>
 #include <unistd.h>
 
+#ifndef ROW_H
+#define ROW_H
 #include "../include/Row.hpp"
+#endif
 
 class MasterTable {
     protected:

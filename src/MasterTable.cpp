@@ -2,26 +2,54 @@
 #include "../include/MasterTable.hpp"
 
 // mutexes
-pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
-int reader_counter = 0;
+pthread_mutex_t read_write_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t reader_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
+int reader_counter_temp = 0;
 
-void shared_reader_lock(){
-	pthread_mutex_lock(&reader_mutex);
-	reader_counter++;
-	if(reader_counter == 1){
-		pthread_mutex_lock(&read_write_mutex);
+void shared_reader_lock_temp(){
+	pthread_mutex_lock(&reader_mutex_temp);
+	reader_counter_temp++;
+	if(reader_counter_temp == 1){
+		pthread_mutex_lock(&read_write_mutex_temp);
 	}
-	pthread_mutex_unlock(&reader_mutex);
+	pthread_mutex_unlock(&reader_mutex_temp);
 }
 
-void shared_reader_unlock(){
-	pthread_mutex_lock(&reader_mutex);
-	reader_counter--;
-	if(reader_counter == 0){
-		pthread_mutex_unlock(&read_write_mutex);
+void shared_reader_unlock_temp(){
+	pthread_mutex_lock(&reader_mutex_temp);
+	reader_counter_temp--;
+	if(reader_counter_temp == 0){
+		pthread_mutex_unlock(&read_write_mutex_temp);
 	}
-	pthread_mutex_unlock(&reader_mutex);
+	pthread_mutex_unlock(&reader_mutex_temp);
+}
+
+
+void MasterTable::addUserIfNotExists(std::string username){
+// TODO
+}
+
+int MasterTable::followUser(std::string followed, std::string follower){
+// TODO
+}
+
+void MasterTable::sendMessageToFollowers(std::string username, std::string message)
+{
+    // TODO consertar mutexes
+    shared_reader_lock_temp();
+    Row* currentRow = this->table.find(username)->second;
+    shared_reader_unlock_temp();
+    std::list<std::string> followers = currentRow->getFollowers();
+    for (std::string follower : followers){
+        shared_reader_lock_temp();
+        Row* followerRow = this->table.find(follower)->second;
+        shared_reader_unlock_temp();
+        followerRow->addNotification(username, message);
+    }
+}
+
+Row* MasterTable::getRow(std::string username){
+// TODO
 }
 
 
@@ -90,9 +118,9 @@ void MasterTable::load_backup_table()
 			}
 
 			// insert new (usename, row) in master_table
-			pthread_mutex_lock(&read_write_mutex);
+			pthread_mutex_lock(&read_write_mutex_temp);
 			this->table.insert( std::make_pair(username, row) );
-			pthread_mutex_unlock(&read_write_mutex);
+			pthread_mutex_unlock(&read_write_mutex_temp);
 		}
 		table_file.close(); 
 	} else {
@@ -103,20 +131,7 @@ void MasterTable::load_backup_table()
 
 
 
-void MasterTable::sendMessageToFollowers(std::string username, std::string message)
-{
-    // TODO consertar mutexes
-    shared_reader_lock();
-    Row* currentRow = this->table.find(username)->second;
-    shared_reader_unlock();
-    std::list<std::string> followers = currentRow->getFollowers();
-    for (std::string follower : followers){
-        shared_reader_lock();
-        Row* followerRow = this->table.find(follower)->second;
-        shared_reader_unlock();
-        followerRow->addNotification(username, message);
-    }
-}
+
 
 void MasterTable::deleteRows()
 {
