@@ -1,10 +1,6 @@
 
 #include "../include/packet.hpp"
 
-void func_test(){
-  printf("\n\n\n\n DEBUG CHAMOU!\n\n\n\n");
-}
-
 packet create_packet(char* message, int packet_type, int seqn)
 {
   packet packet_to_send;

@@ -14,6 +14,8 @@
 #include <iostream>
 #include <poll.h>
 
+#include "../include/packet.hpp"
+
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
@@ -53,156 +55,9 @@ typedef struct __communication_params{
   int port;
 } communication_params;
 
-typedef struct __packet{
-    uint16_t type; // Tipo do pacote:
-        // 0 - CONNECT (username_to_login, seqn)
-        // 1 - FOLLOW (username_to_follow, seqn)
-        // 2 - SEND (message_to_send, seqn)
-        // 3 - MSG (username, message_sent, seqn)
-        // 4 - ACK (seqn)
-        // 5 - ERROR (seqn)
-        // 6 - DISCONNECT (seqn)
-    uint16_t seqn; // Número de sequência
-    uint16_t length; // Comprimento do payload
-    char* _payload; // Dados da mensagem
-} packet;
-
 
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
-
-
-const char* get_packet_type_string(int packet_type)
-{
-  switch (packet_type)
-  {
-  case 0:
-    return "CONNECT";
-    break;
-  case 1:
-    return "FOLLOW";
-    break;
-  case 2:
-    return "SEND";
-    break;
-  case 3:
-    return "MSG";
-    break;
-  case 4:
-    return "ACK";
-    break;
-  case 5:
-    return "ERROR";
-    break;
-  case 6:
-    return "DISCONNECT";
-    break;
-  default:
-    printf("ERROR: invalid packet type\n");
-    return NULL;
-    break;
-  }
-}
-
-int get_packet_type(char* packet_type_string)
-{
-
-  if (strcmp(packet_type_string, "CONNECT") == 0) 
-  {
-    return 0;
-  } 
-  else if (strcmp(packet_type_string, "FOLLOW") == 0)
-  {
-    return 1;
-  }
-  else if (strcmp(packet_type_string, "SEND") == 0)
-  {
-    return 2;
-  }
-  else if (strcmp(packet_type_string, "MSG") == 0)
-  {
-    return 3;
-  }
-  else if (strcmp(packet_type_string, "ACK") == 0)
-  {
-    return 4;
-  }
-  else if (strcmp(packet_type_string, "ERROR") == 0)
-  {
-    return 5;
-  }
-  else if (strcmp(packet_type_string, "DISCONNECT") == 0)
-  {
-    return 6;
-  }
-  else
-  {
-		printf("ERROR: unkown packet type\n");
-    exit(0);
-  }
-}
-
-packet create_packet(char* message, int packet_type)
-{
-  packet packet_to_send;
-  packet_to_send._payload = message;
-  packet_to_send.seqn = seqn;
-  seqn++;
-  packet_to_send.length = strlen(packet_to_send._payload);
-  packet_to_send.type = packet_type;
-  return packet_to_send;
-}
-
-void print_packet(packet packet)
-{
-  printf("Reference seqn: %i \n", packet.seqn);
-  printf("Payload length: %i \n", packet.length);
-  printf("Packet type: %i \n", packet.type);
-  printf("Payload: %s \n", packet._payload);
-  fflush(stdout);
-}
-
-packet buffer_to_packet(char* buffer){
-  packet packet;
-  char payload[PAYLOAD_SIZE];
-
-  int buffer_size = strlen(buffer);
-  buffer[buffer_size] = '\0';
-
-  char* token;
-  const char delimiter[2] = ",";
-  char* rest = buffer;
-
-  //seqn
-  token = strtok_r(rest, delimiter, &rest);
-  packet.seqn = atoi(token);
-
-  //payload_length
-  token = strtok_r(rest, delimiter, &rest);
-  packet.length = atoi(token);
-
-  //packet_type
-  token = strtok_r(rest, delimiter, &rest);
-  packet.type = atoi(token);
-
-  //payload (get whatever else is in there)
-  bzero(payload, PAYLOAD_SIZE); //clear payload buffer
-  token = strtok_r(rest, "", &rest);
-  strncpy(payload, token, packet.length);
-  payload[packet.length] = '\0';
-  packet._payload = (char*) malloc((packet.length) * sizeof(char) + 1);
-  memcpy(packet._payload, payload, (packet.length) * sizeof(char) + 1);
-
-  return packet;
-}
-
-// serializes the packet and puts it in the buffer
-void serialize_packet(packet packet_to_send, char* buffer)
-{
-  memset(buffer, 0, BUFFER_SIZE * sizeof(char));
-  snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
-          packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
-}
 
 // writes a message in a socket (sends a message through it)
 void write_message(int socketfd, char* message)
@@ -265,10 +120,10 @@ void send_connect_message(int socketfd, char* profile_name)
 
   // send CONNECT message
   snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
-  packet_to_send = create_packet(payload, 0);
+  packet_to_send = create_packet(payload, 0, seqn);
+  seqn++;
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
-
   sleep(1);
 }
 
@@ -279,7 +134,8 @@ void send_follow_message(int socketfd, char* profile_name)
   packet packet_to_send;
 
   snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
-  packet_to_send = create_packet(payload, 1);
+  packet_to_send = create_packet(payload, 1, seqn);
+  seqn++;
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
 }
@@ -332,7 +188,8 @@ void communication_loop(int socketfd)
     printf("\nClosing server connection...\nTerminating client....\n");
     // Send a DISCONNECT packet
     snprintf(payload, PAYLOAD_SIZE, " ");
-    packet = create_packet(payload, 6);
+    packet = create_packet(payload, 6, seqn);
+    seqn++;
     serialize_packet(packet, buffer);
     write_message(socketfd, buffer);
     sleep(1);
@@ -412,7 +269,8 @@ void * interface_thread(void *arg) {
           // put the message in a packet
           bzero(payload, sizeof(payload));
           snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-          packet_to_send = create_packet(payload, 1);
+          packet_to_send = create_packet(payload, 1, seqn);
+          seqn++;
           
           // put the packet in the FIFO queue
           pthread_mutex_lock(&packets_to_send_mutex);
@@ -425,7 +283,8 @@ void * interface_thread(void *arg) {
           // put the message in a packet
           bzero(payload, sizeof(payload));
           snprintf(payload, PAYLOAD_SIZE, "%s", tail_ptr);
-          packet_to_send = create_packet(payload, 2);
+          packet_to_send = create_packet(payload, 2, seqn);
+          seqn++;
           
           // put the packet in the FIFO queue
           pthread_mutex_lock(&packets_to_send_mutex);

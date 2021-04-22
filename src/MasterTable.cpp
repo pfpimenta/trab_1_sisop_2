@@ -6,6 +6,7 @@ pthread_mutex_t read_write_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t reader_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
 int reader_counter_temp = 0;
 
+// TODO maybe rename this
 void shared_reader_lock_temp(){
 	pthread_mutex_lock(&reader_mutex_temp);
 	reader_counter_temp++;
@@ -26,11 +27,49 @@ void shared_reader_unlock_temp(){
 
 
 void MasterTable::addUserIfNotExists(std::string username){
-// TODO
+	Row* newRow = new Row;
+	pthread_mutex_lock(&read_write_mutex_temp);
+	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
+	if(usernameDoesNotExist)
+	{
+		this->table.insert( std::make_pair( username, newRow) );
+		save_backup_table();
+	}
+	pthread_mutex_unlock(&read_write_mutex_temp);
 }
 
 int MasterTable::followUser(std::string followed, std::string follower){
-// TODO
+	// TODO : mutexes
+	
+	// check if current user exists 
+	bool currentUserExists = (this->table.find(follower) != this->table.end());
+	if(currentUserExists == false){
+		return -1;
+	}
+	// check if newFollowing exists
+	bool newFollowedExists = (this->table.find(followed) != this->table.end());
+	if(newFollowedExists == false){
+		return -1;
+	}
+
+	// check if currentUser is not trying to follow himself
+	bool notFollowingHimself = (followed != follower);
+	if(notFollowingHimself == false){
+		return -2;
+	}
+
+	// check if currentUser does not follow newFollowing yet
+	Row* currentRow = this->table.find(follower)->second;
+	Row* followingRow = this->table.find(followed)->second;
+	bool notDuplicateFollowing = (! followingRow->hasFollower(follower));
+	if(notDuplicateFollowing == false) {
+		return -3;
+	} else {
+		// add new follower!
+		followingRow->setAddNewFollower(follower);
+		save_backup_table();
+		return 0;
+	} 
 }
 
 void MasterTable::sendMessageToFollowers(std::string username, std::string message)
@@ -49,7 +88,11 @@ void MasterTable::sendMessageToFollowers(std::string username, std::string messa
 }
 
 Row* MasterTable::getRow(std::string username){
-// TODO
+	Row* currentRow;
+	shared_reader_lock_temp();
+	currentRow = this->table.find(username)->second;
+	shared_reader_unlock_temp();
+	return currentRow;
 }
 
 
@@ -63,7 +106,7 @@ void MasterTable::save_backup_table()
 	std::ofstream table_file;
 	table_file.open ("backup_table.txt", std::ios::out | std::ios::trunc); 
 	for(auto const& x : this->table)
-	{	
+	{
 		username = x.first;
 		row = x.second;
 		followers = row->getFollowers();
@@ -81,9 +124,6 @@ void MasterTable::save_backup_table()
 	table_file.close(); 
 }
 
-// inline bool file_exists (const std::string& name) {
-//     return ( access( name.c_str(), F_OK ) != -1 );
-// }
 
 // loads the master_table from a TXT file, if it exists
 void MasterTable::load_backup_table()
@@ -128,10 +168,6 @@ void MasterTable::load_backup_table()
 		fflush(stdout);
 	}
 }
-
-
-
-
 
 void MasterTable::deleteRows()
 {

@@ -27,7 +27,6 @@
 MasterTable* masterTable;
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
-// int reader_counter = 0;
 
 #define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
@@ -202,29 +201,12 @@ void * socket_thread(void *arg) {
 					{
 						std::string username(payload); //copying char array into proper std::string type
 						currentUser = username;
-						Row* newRow = new Row;
 
 						// check if map already has the username in there before inserting
 						masterTable->addUserIfNotExists(username);
-						// shared_reader_lock();
-						// bool usernameDoesNotExist = (master_table.find(username) == master_table.end());
-						// shared_reader_unlock();
-						// if(usernameDoesNotExist)
-						// {
-						// 	pthread_mutex_lock(&read_write_mutex);
-						// 	master_table.insert( std::make_pair( username, newRow) );
-						// 	pthread_mutex_unlock(&read_write_mutex);
-						// 	save_backup_table();
-						// }
-
 						std::cout << "User " + currentUser + " is connecting...";
 
-						// checks if there are already 2 open sessions for this user
-						
 						currentRow = masterTable->getRow(username);
-						// shared_reader_lock();
-						// currentRow = master_table.find(currentUser)->second;
-						// shared_reader_unlock();
 						
 						if(currentRow->connectUser())
 						{
@@ -234,16 +216,6 @@ void * socket_thread(void *arg) {
 							printf("\n denied: there are already 2 active sessions!\n");
 						 	closeConnection(socket, (int)thread_id);
 						}
-						// int activeSessions = currentRow->getActiveSessions();
-						// bool cond = (activeSessions >= 2);
-						
-						// if(cond){
-						// 	printf("\n denied: there are already 2 active sessions!\n");
-						// 	closeConnection(socket, (int)thread_id);
-						// } else {
-						// 	currentRow->startSession();
-						// 	std::cout << " connected." << std::endl;
-						// }
 						break;
 					}
 					case TYPE_FOLLOW:
@@ -270,32 +242,6 @@ void * socket_thread(void *arg) {
 								std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl;
 								break;
 						}
-						// check if current user exists 
-						// shared_reader_lock();
-						// bool currentUserExists = (master_table.find(currentUser) != master_table.end());
-						// // check if newFollowing exists
-						// bool newFollowingExists = (master_table.find(newFollowedUsername) != master_table.end());
-						// // check if currentUser is not trying to follow himself
-						// bool notFollowingHimself = (currentUser != newFollowedUsername);
-						// shared_reader_unlock();
-						// if(currentUserExists && newFollowingExists && notFollowingHimself)
-						// {
-						// 	shared_reader_lock();
-						// 	currentRow = master_table.find(currentUser)->second;
-						// 	Row* followingRow = master_table.find(newFollowedUsername)->second;
-						// 	// check if currentUser does not follow newFollowing yet
-						// 	bool notDuplicateFollowing = (! followingRow->hasFollower(currentUser));
-						// 	shared_reader_unlock();
-						// 	if(notDuplicateFollowing) {
-						// 		followingRow->setAddNewFollower(currentUser);
-						// 		std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl;
-						// 	} else {
-						// 		std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl;
-						// 	}
-						// 	save_backup_table();
-						// } else {
-						// 	std::cout << currentUser + " is trying to follow " + newFollowedUsername + " but either user does not exist or " + currentUser + " is trying to follow himself." << std::endl;
-						// }
 						break;
 					}
 					case TYPE_SEND:
@@ -385,8 +331,6 @@ void exit_hook_handler(int signal) {
 
 int main(int argc, char *argv[])
 {
-	func_test();
-
 	int i = 0;
 	int sockfd;
 	int newsockfd;

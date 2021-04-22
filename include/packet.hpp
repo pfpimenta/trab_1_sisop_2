@@ -15,7 +15,6 @@
 #define TYPE_ERROR 5
 #define TYPE_DISCONNECT 6
 
-void func_test();
 
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:

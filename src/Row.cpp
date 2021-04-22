@@ -51,9 +51,17 @@ int Row::getActiveSessions(){
 	return num_active_sessions;
 }
 
-
 bool Row::connectUser(){
-	// TODO
+	bool connectionSuccessfull;
+	pthread_mutex_lock(&read_write_mutex);
+	if(this->active_sessions >= 2){
+		connectionSuccessfull = false;
+	} else {
+		this->active_sessions += 1;
+		connectionSuccessfull = true;
+	}
+	pthread_mutex_unlock(&read_write_mutex);
+	return connectionSuccessfull;
 }
 
 bool Row::get_notification_delivered(){
