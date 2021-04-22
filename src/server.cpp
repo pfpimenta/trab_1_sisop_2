@@ -195,12 +195,15 @@ void * socket_thread(void *arg) {
 				//payload (get whatever else is in there up to '\n')
 				token = strtok_r(rest, "\n", &rest);
 				strncpy(payload, token, payload_length);
+				
+				printf("DEBUG 4 \n\n"); fflush(stdout);
 
 				switch (message_type) {
 					case TYPE_CONNECT:
 					{
 						std::string username(payload); //copying char array into proper std::string type
 						currentUser = username;
+						printf("DEBUG 5a \n\n"); fflush(stdout);
 
 						// check if map already has the username in there before inserting
 						masterTable->addUserIfNotExists(username);
@@ -216,6 +219,7 @@ void * socket_thread(void *arg) {
 							printf("\n denied: there are already 2 active sessions!\n");
 						 	closeConnection(socket, (int)thread_id);
 						}
+						printf("DEBUG 6 \n\n"); fflush(stdout);
 						break;
 					}
 					case TYPE_FOLLOW:
@@ -370,7 +374,6 @@ int main(int argc, char *argv[])
 			}	
 			
 			*newsockptr = newsockfd;
-			
 			if (pthread_create(&newthread, NULL, socket_thread, newsockptr) != 0 ) {
 				printf("Failed to create thread\n");
 				exit(-1);

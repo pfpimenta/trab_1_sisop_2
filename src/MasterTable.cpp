@@ -28,6 +28,8 @@ void shared_reader_unlock_temp(){
 
 void MasterTable::addUserIfNotExists(std::string username){
 	Row* newRow = new Row;
+	printf("DEBUG addUserIfNotExists \n\n"); fflush(stdout);
+
 	pthread_mutex_lock(&read_write_mutex_temp);
 	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
 	if(usernameDoesNotExist)
@@ -36,6 +38,8 @@ void MasterTable::addUserIfNotExists(std::string username){
 		save_backup_table();
 	}
 	pthread_mutex_unlock(&read_write_mutex_temp);
+
+	printf("DEBUG fim  addUserIfNotExists \n\n"); fflush(stdout);
 }
 
 int MasterTable::followUser(std::string followed, std::string follower){
