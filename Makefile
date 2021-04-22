@@ -1,6 +1,12 @@
 
-all: server
+all: server client
 
+client: packet.o client.o 
+	g++ -g -o client client.o packet.o -pthread
+
+client.o: src/client.cpp include/packet.hpp
+	g++ -g -c -o client.o src/client.cpp -pthread
+	
 server: Row.o MasterTable.o packet.o server.o 
 	g++ -g -o server server.o packet.o Row.o MasterTable.o -pthread
 
@@ -17,4 +23,4 @@ Row.o: src/Row.cpp include/Row.hpp
 	g++ -g -c -o Row.o src/Row.cpp -pthread
 
 clean:
-	rm -rf *.o *~ server
+	rm -rf *.o *~ server client
