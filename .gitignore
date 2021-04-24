@@ -4,6 +4,7 @@ Server/server
 Server/backup_table.txt
 server
 client
+backup_table.txt
 
 # Aux files
 compile_flags.txt
