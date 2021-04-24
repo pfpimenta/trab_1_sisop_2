@@ -15,9 +15,11 @@ class Row {
 		bool notification_delivered;
 		std::list<std::string> followers;
 		std::list<std::string> messages_to_receive;
+		int reader_counter;
+		pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
+		pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 	public:
-		//constructor
 		Row();
 		void startSession();
 		void closeSession();
@@ -35,5 +37,8 @@ class Row {
 		std::string popNotification();
 		// returns a notification from the list
 		std::string getNotification();
+		void shared_reader_lock();
+		void shared_reader_unlock();
+
 
 };

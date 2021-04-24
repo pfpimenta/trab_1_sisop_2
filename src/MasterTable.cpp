@@ -1,43 +1,24 @@
 
 #include "../include/MasterTable.hpp"
 
-// mutexes
-pthread_mutex_t read_write_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t reader_mutex_temp = PTHREAD_MUTEX_INITIALIZER;
-int reader_counter_temp = 0;
-
-// TODO maybe rename this
-void shared_reader_lock_temp(){
-	pthread_mutex_lock(&reader_mutex_temp);
-	reader_counter_temp++;
-	if(reader_counter_temp == 1){
-		pthread_mutex_lock(&read_write_mutex_temp);
-	}
-	pthread_mutex_unlock(&reader_mutex_temp);
+MasterTable	::MasterTable() {
+	this->reader_counter = 0;
+	this->read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
+    this->reader_mutex = PTHREAD_MUTEX_INITIALIZER;
 }
-
-void shared_reader_unlock_temp(){
-	pthread_mutex_lock(&reader_mutex_temp);
-	reader_counter_temp--;
-	if(reader_counter_temp == 0){
-		pthread_mutex_unlock(&read_write_mutex_temp);
-	}
-	pthread_mutex_unlock(&reader_mutex_temp);
-}
-
 
 void MasterTable::addUserIfNotExists(std::string username){
 	Row* newRow = new Row;
 	printf("DEBUG addUserIfNotExists \n\n"); fflush(stdout);
 
-	pthread_mutex_lock(&read_write_mutex_temp);
+	pthread_mutex_lock(&(this->read_write_mutex));
 	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
 	if(usernameDoesNotExist)
 	{
 		this->table.insert( std::make_pair( username, newRow) );
 		save_backup_table();
 	}
-	pthread_mutex_unlock(&read_write_mutex_temp);
+	pthread_mutex_unlock(&(this->read_write_mutex));
 
 	printf("DEBUG fim  addUserIfNotExists \n\n"); fflush(stdout);
 }
@@ -79,23 +60,23 @@ int MasterTable::followUser(std::string followed, std::string follower){
 void MasterTable::sendMessageToFollowers(std::string username, std::string message)
 {
     // TODO consertar mutexes
-    shared_reader_lock_temp();
+    this->shared_reader_lock();
     Row* currentRow = this->table.find(username)->second;
-    shared_reader_unlock_temp();
+    this->shared_reader_unlock();
     std::list<std::string> followers = currentRow->getFollowers();
     for (std::string follower : followers){
-        shared_reader_lock_temp();
+        this->shared_reader_lock();
         Row* followerRow = this->table.find(follower)->second;
-        shared_reader_unlock_temp();
+        this->shared_reader_unlock();
         followerRow->addNotification(username, message);
     }
 }
 
 Row* MasterTable::getRow(std::string username){
 	Row* currentRow;
-	shared_reader_lock_temp();
+	this->shared_reader_lock();
 	currentRow = this->table.find(username)->second;
-	shared_reader_unlock_temp();
+	this->shared_reader_unlock();
 	return currentRow;
 }
 
@@ -162,9 +143,9 @@ void MasterTable::load_backup_table()
 			}
 
 			// insert new (usename, row) in master_table
-			pthread_mutex_lock(&read_write_mutex_temp);
+			pthread_mutex_lock(&(this->read_write_mutex));
 			this->table.insert( std::make_pair(username, row) );
-			pthread_mutex_unlock(&read_write_mutex_temp);
+			pthread_mutex_unlock(&(this->read_write_mutex));
 		}
 		table_file.close(); 
 	} else {
@@ -178,4 +159,22 @@ void MasterTable::deleteRows()
     for (auto const& x : this->table) {
         delete(x.second);
     }
+}
+
+void MasterTable::shared_reader_lock(){
+	pthread_mutex_lock(&(this->reader_mutex));
+	this->reader_counter++;
+	if(this->reader_counter == 1){
+		pthread_mutex_lock(&(this->read_write_mutex));
+	}
+	pthread_mutex_unlock(&(this->reader_mutex));
+}
+
+void MasterTable::shared_reader_unlock(){
+	pthread_mutex_lock(&(this->reader_mutex));
+	this->reader_counter--;
+	if(this->reader_counter == 0){
+		pthread_mutex_unlock(&(this->read_write_mutex));
+	}
+	pthread_mutex_unlock(&(this->reader_mutex));
 }

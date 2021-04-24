@@ -59,8 +59,6 @@ void set_termination_signal(){
   pthread_mutex_unlock(&termination_signal_mutex);
 }
 
-//------------------
-
 
 void closeConnection(int socket, int thread_id)
 {

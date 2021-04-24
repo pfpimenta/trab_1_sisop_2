@@ -1,4 +1,3 @@
-
 all: server client
 
 client: packet.o client.o 
