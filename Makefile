@@ -1,25 +1,28 @@
+CFLAGS = -g -Wall
+LDFLAGS = -pthread
+
 all: server client
 
 client: packet.o client.o 
-	g++ -g -o client client.o packet.o -pthread
+	g++ $(CFLAGS) -o client client.o packet.o $(LDFLAGS)
 
 client.o: src/client.cpp include/packet.hpp
-	g++ -g -c -o client.o src/client.cpp -pthread
+	g++ $(CFLAGS) -o client.o -c src/client.cpp $(LDFLAGS)
 	
 server: Row.o MasterTable.o packet.o server.o 
-	g++ -g -o server server.o packet.o Row.o MasterTable.o -pthread
+	g++ $(CFLAGS) -o server server.o packet.o Row.o MasterTable.o $(LDFLAGS)
 
 server.o: src/server.cpp include/packet.hpp
-	g++ -g -c -o server.o src/server.cpp -pthread
+	g++ $(CFLAGS) -o server.o -c src/server.cpp $(LDFLAGS)
 
 packet.o: src/packet.cpp include/packet.hpp
-	g++ -g -c -o packet.o src/packet.cpp -pthread
+	g++ $(CFLAGS) -o packet.o -c src/packet.cpp $(LDFLAGS)
 
 MasterTable.o: src/MasterTable.cpp include/MasterTable.hpp
-	g++ -g -c -o MasterTable.o src/MasterTable.cpp -pthread
+	g++ $(CFLAGS) -o MasterTable.o -c src/MasterTable.cpp $(LDFLAGS)
 
 Row.o: src/Row.cpp include/Row.hpp
-	g++ -g -c -o Row.o src/Row.cpp -pthread
+	g++ $(CFLAGS) -o Row.o -c src/Row.cpp $(LDFLAGS)
 
 clean:
 	rm -rf *.o *~ server client
