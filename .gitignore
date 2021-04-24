@@ -2,6 +2,8 @@
 Client/client
 Server/server
 Server/backup_table.txt
+server
+client
 
 # Aux files
 compile_flags.txt
