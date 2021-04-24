@@ -1,0 +1,38 @@
+-> refatorar codigo
+	-> separar em modulos
+	-> transformar master_table numa classe com metodos atomicos
+
+-> mutexes precisam ser atomicos
+
+-> hook on exit, ctrl+c, ctrl+d (do servidor):
+	-> mandar logout message do servidor pro cliente
+
+-> Rever todas as questões de mutex, e locais em que podemos precisar setar mutexes e atualmente não tem
+	-> idealmente em vez de um mutex global, teríamos mutexes mais granulares (por exemplo, um mutex pra cada row)
+
+-> tratamento de timeout de conexão;
+	-> imaginar que server e cliente caíram se não responderem em menos de X segundos
+
+-> implementar RM (replica manager) primario + backups
+	-> comunicação das atualizações entre as RMs
+	-> heartbeat + timeout  para detecção de falha na RM primaria
+	-> alg. de eleição de lider
+
+-> cliente deve alocar um socket em listen dinamicamente para receber mudanças de RM lider
+	-> deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
+
+-> ACKs e ERRORs (enviados pelo cliente e pelo servidor. cliente só vai mandar acks).
+	-> Mudar um pouco o payload do ERROR para referenciar o número de sequência mas também dizer qual tipo de erro que é
+	-> quando o usuario tenta seguir ele mesmo
+	-> quando o usuario tenta seguir alguem que ele ja segue
+	-> quando usuário de seguir alguém que não existe
+	-> ...
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Duvidas:
+
+O que e o frontend? Roda na maquina do cliente ou na maquina do server?
+Os backups ficam todos no mesmo IP ou ficam em IPs diferentes?
+Quando o primario cai, o backup da bind e listen na porta que o antigo primario estava usando?
+A comunicacao entre o primario e os backups eh feita como? Via socket ou via arquivou
