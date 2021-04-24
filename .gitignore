@@ -6,10 +6,6 @@ server
 client
 backup_table.txt
 
-# Aux files
-compile_flags.txt
-vscode/*
-
 # Prerequisites
 *.d
 
