@@ -346,15 +346,15 @@ int main(int argc, char *argv[])
 	pthread_t newthread;
 	std::list<int*> socketptrs_list;
 
-	// Initialize global MasterTable instance
-	masterTable = new MasterTable;
-
 	// Install handler (assign handler to signal)
     std::signal(SIGINT, exit_hook_handler);
 	std::signal(SIGTERM, exit_hook_handler);
 	std::signal(SIGABRT, exit_hook_handler);
 
-	// load backup table
+	// Initialize global MasterTable instance
+	masterTable = new MasterTable;
+
+	// load backup table if it exists
 	masterTable->load_backup_table();
 
 	// setup LISTEN socket

@@ -11,9 +11,7 @@ void MasterTable::addUserIfNotExists(std::string username){
 	Row* newRow = new Row;
 	printf("DEBUG addUserIfNotExists \n\n"); fflush(stdout);
 
-	pthread_mutex_t* ptr = &(this->read_write_mutex);
-
-	pthread_mutex_lock(ptr);
+	pthread_mutex_lock(&(this->read_write_mutex));
 	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
 	if(usernameDoesNotExist)
 	{
