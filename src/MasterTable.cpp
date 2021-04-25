@@ -5,12 +5,11 @@ MasterTable	::MasterTable() {
 	this->reader_counter = 0;
 	this->read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
     this->reader_mutex = PTHREAD_MUTEX_INITIALIZER;
+    this->backup_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 }
 
 void MasterTable::addUserIfNotExists(std::string username){
 	Row* newRow = new Row;
-	printf("DEBUG addUserIfNotExists \n\n"); fflush(stdout);
-
 	pthread_mutex_lock(&(this->read_write_mutex));
 	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
 	if(usernameDoesNotExist)
@@ -19,13 +18,11 @@ void MasterTable::addUserIfNotExists(std::string username){
 		save_backup_table();
 	}
 	pthread_mutex_unlock(&(this->read_write_mutex));
-
-	printf("DEBUG fim  addUserIfNotExists \n\n"); fflush(stdout);
 }
 
 int MasterTable::followUser(std::string followed, std::string follower){
-	// TODO : mutexes
 	
+	pthread_mutex_lock(&(this->read_write_mutex));
 	// check if current user exists 
 	bool currentUserExists = (this->table.find(follower) != this->table.end());
 	if(currentUserExists == false){
@@ -55,21 +52,19 @@ int MasterTable::followUser(std::string followed, std::string follower){
 		save_backup_table();
 		return 0;
 	} 
+	pthread_mutex_unlock(&(this->read_write_mutex));
 }
 
 void MasterTable::sendMessageToFollowers(std::string username, std::string message)
 {
-    // TODO consertar mutexes
     this->shared_reader_lock();
     Row* currentRow = this->table.find(username)->second;
-    this->shared_reader_unlock();
     std::list<std::string> followers = currentRow->getFollowers();
     for (std::string follower : followers){
-        this->shared_reader_lock();
         Row* followerRow = this->table.find(follower)->second;
-        this->shared_reader_unlock();
         followerRow->addNotification(username, message);
     }
+    this->shared_reader_unlock();
 }
 
 Row* MasterTable::getRow(std::string username){
@@ -84,7 +79,7 @@ Row* MasterTable::getRow(std::string username){
 // saves the master_table into a TXT file
 void MasterTable::save_backup_table()
 {
-	//master_table
+	pthread_mutex_lock(&(this->backup_table_mutex));
 	std::list<std::string> followers;
 	std::string username;
 	Row* row;
@@ -107,12 +102,14 @@ void MasterTable::save_backup_table()
 		table_file << "\n";
 	}
 	table_file.close(); 
+	pthread_mutex_unlock(&(this->backup_table_mutex));
 }
 
 
 // loads the master_table from a TXT file, if it exists
 void MasterTable::load_backup_table()
 {
+	pthread_mutex_lock(&(this->backup_table_mutex));
 	char* line_ptr_aux;
 	char* token;
 	Row* row;
@@ -152,13 +149,16 @@ void MasterTable::load_backup_table()
 		printf("Backup table not found. Creating new. \n");
 		fflush(stdout);
 	}
+	pthread_mutex_unlock(&(this->backup_table_mutex));
 }
 
 void MasterTable::deleteRows()
 {
+	pthread_mutex_lock(&(this->backup_table_mutex));
     for (auto const& x : this->table) {
         delete(x.second);
     }
+	pthread_mutex_unlock(&(this->backup_table_mutex));
 }
 
 void MasterTable::shared_reader_lock(){
