@@ -1,25 +1,37 @@
--> refatorar codigo
-	-> separar em modulos
-	-> transformar master_table numa classe com metodos atomicos
+-> consertar servidor que esta morrendo
 
--> mutexes precisam ser atomicos
+-> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
+	-> a cada modificação, essa lista é propagada pros backups
+
+-> o primario envia um numero de ID unico para cada backup
+
+-> parametros dos RMs backup:
+	-> ip e porta do primario
+	-> quando nao houver parametro, quer dizer que é o primario
+
+-> replicação das atualizações do RM primario para os backups
+
+-> sistema de timeout e retransmissao (dos dois lados)
+	-> cliente: tenta mandar 3x, dai desliga
+	-> servidor: tenta mandar 3x, dai mata a sessao mas deixa a notificacao na lista
+
+-> nova porta listen do cliente:
+	-> para receber aviso de troca de server primario
+	-> para receber heartbeat
+	-> cliente deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
+
+-> heartbeat
+	-> cliente pro servidor primario
+	-> servidor primario pros clientes
+	-> servidor primario pros servidores backup
+	-> servidores backup pro servidor primario
+
+-> algoritmo de eleiçao (bully)
+
+-> cliente: espera a resposta antes de enviar a proxima mensagem
 
 -> hook on exit, ctrl+c, ctrl+d (do servidor):
 	-> mandar logout message do servidor pro cliente
-
--> Rever todas as questões de mutex, e locais em que podemos precisar setar mutexes e atualmente não tem
-	-> idealmente em vez de um mutex global, teríamos mutexes mais granulares (por exemplo, um mutex pra cada row)
-
--> tratamento de timeout de conexão;
-	-> imaginar que server e cliente caíram se não responderem em menos de X segundos
-
--> implementar RM (replica manager) primario + backups
-	-> comunicação das atualizações entre as RMs
-	-> heartbeat + timeout  para detecção de falha na RM primaria
-	-> alg. de eleição de lider
-
--> cliente deve alocar um socket em listen dinamicamente para receber mudanças de RM lider
-	-> deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
 
 -> ACKs e ERRORs (enviados pelo cliente e pelo servidor. cliente só vai mandar acks).
 	-> Mudar um pouco o payload do ERROR para referenciar o número de sequência mas também dizer qual tipo de erro que é
@@ -28,11 +40,4 @@
 	-> quando usuário de seguir alguém que não existe
 	-> ...
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-Duvidas:
-
-O que e o frontend? Roda na maquina do cliente ou na maquina do server?
-Os backups ficam todos no mesmo IP ou ficam em IPs diferentes?
-Quando o primario cai, o backup da bind e listen na porta que o antigo primario estava usando?
-A comunicacao entre o primario e os backups eh feita como? Via socket ou via arquivou
+-> resolver warnings
