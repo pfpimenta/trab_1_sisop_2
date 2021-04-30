@@ -15,7 +15,7 @@ void MasterTable::addUserIfNotExists(std::string username){
 	if(usernameDoesNotExist)
 	{
 		this->table.insert( std::make_pair( username, newRow) );
-		save_backup_table();
+		this->save_backup_table();
 	}
 	pthread_mutex_unlock(&(this->read_write_mutex));
 }
@@ -23,20 +23,24 @@ void MasterTable::addUserIfNotExists(std::string username){
 int MasterTable::followUser(std::string followed, std::string follower){
 	
 	pthread_mutex_lock(&(this->read_write_mutex));
+	
 	// check if current user exists 
 	bool currentUserExists = (this->table.find(follower) != this->table.end());
 	if(currentUserExists == false){
+		pthread_mutex_unlock(&(this->read_write_mutex));
 		return -1;
 	}
 	// check if newFollowing exists
 	bool newFollowedExists = (this->table.find(followed) != this->table.end());
 	if(newFollowedExists == false){
+		pthread_mutex_unlock(&(this->read_write_mutex));
 		return -1;
 	}
 
 	// check if currentUser is not trying to follow himself
 	bool notFollowingHimself = (followed != follower);
 	if(notFollowingHimself == false){
+		pthread_mutex_unlock(&(this->read_write_mutex));
 		return -2;
 	}
 
@@ -45,14 +49,15 @@ int MasterTable::followUser(std::string followed, std::string follower){
 	Row* followingRow = this->table.find(followed)->second;
 	bool notDuplicateFollowing = (! followingRow->hasFollower(follower));
 	if(notDuplicateFollowing == false) {
+		pthread_mutex_unlock(&(this->read_write_mutex));
 		return -3;
 	} else {
 		// add new follower!
 		followingRow->setAddNewFollower(follower);
-		save_backup_table();
+		this->save_backup_table();
+		pthread_mutex_unlock(&(this->read_write_mutex));
 		return 0;
 	} 
-	pthread_mutex_unlock(&(this->read_write_mutex));
 }
 
 void MasterTable::sendMessageToFollowers(std::string username, std::string message)

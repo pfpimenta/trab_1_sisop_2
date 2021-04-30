@@ -185,6 +185,7 @@ void * socket_thread(void *arg) {
 				//payload_length
 				token = strtok_r(rest, delimiter, &rest);
 				payload_length = atoi(token);
+				
 
 				//packet_type
 				token = strtok_r(rest, delimiter, &rest);
@@ -211,7 +212,7 @@ void * socket_thread(void *arg) {
 							std::cout << " connected." << std::endl;
 						} else{
 							// TODO mandar mensagem pro cliente avisando q ele atingiu o limite
-							printf("\n denied: there are already 2 active sessions!\n");
+							printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
 						 	closeConnection(socket, (int)thread_id);
 						}
 						break;
@@ -224,20 +225,20 @@ void * socket_thread(void *arg) {
 						switch(status){
 							case 0:
 								// TODO avisar usuario q ta tudo bem
-								std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl;
+								std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 								break;
 							case -1:
 								// user does not exist
 								// TODO avisar usuario
-								printf("ERROR: user does not exist.");
+								printf("ERROR: user does not exist.\n"); fflush(stdout);
 								break;
 							case -2:
 								// TODO avisar usuario
-								printf("ERROR: user cannot follow himself.");
+								printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
 								break;
 							case -3:
 								// TODO avisar usuario
-								std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl;
+								std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 								break;
 						}
 						break;

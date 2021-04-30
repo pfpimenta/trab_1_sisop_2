@@ -310,8 +310,6 @@ void * interface_thread(void *arg) {
 
       // print notification
       printf("Notification: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload);
-      printf("DEBUG received seqn: %u\n", packet_received.seqn);
-
       printf("\n> "); fflush(stdout);
       
     }
