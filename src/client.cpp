@@ -233,7 +233,6 @@ void * interface_thread(void *arg) {
   char* rest;
   char* tail_ptr;
 	char delim[3] = " ";
-  int num_notifications;
 
   // print pthread id
 	pthread_t thread_id = pthread_self();

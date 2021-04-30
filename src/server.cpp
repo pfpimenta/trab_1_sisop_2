@@ -305,7 +305,7 @@ void * socket_thread(void *arg) {
 						std::time_t start_timestamp = std::time(nullptr);
 						while(currentRow->get_notification_delivered() == true && timeout_condition){
 							std::time_t loop_timestamp = std::time(nullptr);
-							bool timeout_condition = (loop_timestamp - start_timestamp <= 3);
+							timeout_condition = (loop_timestamp - start_timestamp <= 3);
 						}
 					}
 				}
@@ -330,15 +330,11 @@ void exit_hook_handler(int signal) {
 
 int main(int argc, char *argv[])
 {
-	int i = 0;
 	int sockfd;
 	int newsockfd;
 	int* newsockptr;
 	socklen_t clilen;
-	char buffer[BUFFER_SIZE];
-  	char message[PAYLOAD_SIZE];
-	struct sockaddr_in serv_addr, cli_addr;
-	packet packet_to_send;
+	struct sockaddr_in cli_addr;
 	std::list<pthread_t> threads_list;
 	pthread_t newthread;
 	std::list<int*> socketptrs_list;
@@ -390,13 +386,13 @@ int main(int argc, char *argv[])
 				std::cout << "Failed to shutdown a connection socket." << std::endl;
 			}
 			close(sockfd);
-			for (auto const& i : threads_list) {
-				pthread_join(i, NULL);
+			for (auto const& thread_id : threads_list) {
+				pthread_join(thread_id, NULL);
 			}
 
 			std::cout << "Freeing allocated socket pointers memory..." << std::endl;
-			for (auto const& i : socketptrs_list) {
-				free(i);
+			for (auto const& socket_id : socketptrs_list) {
+				free(socket_id);
 			}
 
 			std::cout << "Deleting instantiated objects..." << std::endl;

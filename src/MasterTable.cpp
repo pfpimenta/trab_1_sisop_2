@@ -23,7 +23,7 @@ void MasterTable::addUserIfNotExists(std::string username){
 int MasterTable::followUser(std::string followed, std::string follower){
 	
 	pthread_mutex_lock(&(this->read_write_mutex));
-	
+
 	// check if current user exists 
 	bool currentUserExists = (this->table.find(follower) != this->table.end());
 	if(currentUserExists == false){
@@ -45,7 +45,6 @@ int MasterTable::followUser(std::string followed, std::string follower){
 	}
 
 	// check if currentUser does not follow newFollowing yet
-	Row* currentRow = this->table.find(follower)->second;
 	Row* followingRow = this->table.find(followed)->second;
 	bool notDuplicateFollowing = (! followingRow->hasFollower(follower));
 	if(notDuplicateFollowing == false) {
