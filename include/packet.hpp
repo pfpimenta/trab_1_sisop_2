@@ -23,7 +23,7 @@ typedef struct __packet{
         // 2 - SEND (message_to_send, seqn)
         // 3 - MSG (username, message_sent, seqn)
         // 4 - ACK (seqn)
-        // 5 - ERROR (seqn)
+        // 5 - ERROR (seqn, error_message)
         // 6 - DISCONNECT (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload

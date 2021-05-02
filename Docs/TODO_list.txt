@@ -32,10 +32,5 @@
 	-> mandar logout message do servidor pro cliente
 
 -> ACKs e ERRORs (enviados pelo cliente e pelo servidor. cliente só vai mandar acks).
-	-> Mudar um pouco o payload do ERROR para referenciar o número de sequência mas também dizer qual tipo de erro que é
-	-> quando o usuario tenta seguir ele mesmo
-	-> quando o usuario tenta seguir alguem que ele ja segue
-	-> quando usuário de seguir alguém que não existe
-	-> ...
-
--> resolver warnings
+	-> Falta cliente enviar ACK
+	-> Falta cliente e servidor reconhecer ACK

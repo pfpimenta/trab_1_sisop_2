@@ -26,3 +26,4 @@ Row.o: src/Row.cpp include/Row.hpp
 
 clean:
 	rm -rf *.o *~ server client
+

@@ -128,12 +128,34 @@ int accept_connection(int sockfd)
 	return newsockfd;
 }
 
+
+void send_ack_to_client(int socket, int reference_seqn)
+{
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+	packet packet_to_send = create_packet(payload, TYPE_ACK, reference_seqn);
+	serialize_packet(packet_to_send, buffer);
+	write_message(socket, buffer);
+}
+
+
+void send_error_to_client(int socket, int reference_seqn, char* error_message)
+{
+	char buffer[BUFFER_SIZE];
+	packet packet_to_send = create_packet(error_message, TYPE_ERROR, reference_seqn);
+	serialize_packet(packet_to_send, buffer);
+	write_message(socket, buffer);
+}
+
+
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int size = 0;
 	int seqn = 0;
 	int reference_seqn = 0;
+	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
 	char payload[PAYLOAD_SIZE];
 	char client_message[BUFFER_SIZE];
 	char buffer[BUFFER_SIZE];
@@ -173,6 +195,7 @@ void * socket_thread(void *arg) {
   			char* rest_packet = client_message;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
+				// PARSE:
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				char* token;
 				char* rest = buffer;
@@ -194,76 +217,93 @@ void * socket_thread(void *arg) {
 				//payload (get whatever else is in there up to '\n')
 				token = strtok_r(rest, "\n", &rest);
 				strncpy(payload, token, payload_length);
-				
-				switch (message_type) {
-					case TYPE_CONNECT:
-					{
-						std::string username(payload); //copying char array into proper std::string type
-						currentUser = username;
 
-						// check if map already has the username in there before inserting
-						masterTable->addUserIfNotExists(username);
-						std::cout << "User " + currentUser + " is connecting...";
-
-						currentRow = masterTable->getRow(username);
-						
-						if(currentRow->connectUser())
+				if(reference_seqn <= max_reference_seqn){
+					// already received this message
+					// TODO
+					send_ack_to_client(socket, reference_seqn);
+				} else {
+					max_reference_seqn = reference_seqn;
+					switch (message_type) {
+						case TYPE_CONNECT:
 						{
-							std::cout << " connected." << std::endl;
-						} else{
-							// TODO mandar mensagem pro cliente avisando q ele atingiu o limite
-							printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
-						 	closeConnection(socket, (int)thread_id);
+							std::string username(payload); //copying char array into proper std::string type
+							currentUser = username;
+
+							// check if map already has the username in there before inserting
+							masterTable->addUserIfNotExists(username);
+							std::cout << "User " + currentUser + " is connecting...";
+
+							currentRow = masterTable->getRow(username);
+							
+							if(currentRow->connectUser())
+							{
+								// TODO mandar mensagem pro cliente : sucesso!
+								send_ack_to_client(socket, reference_seqn);
+								std::cout << " connected." << std::endl;
+							} else{
+								// TODO mandar mensagem pro cliente avisando q ele atingiu o limite
+								snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
+								send_error_to_client(socket, reference_seqn, payload);
+								printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
+								closeConnection(socket, (int)thread_id);
+							}
+							break;
 						}
-						break;
-					}
-					case TYPE_FOLLOW:
-					{
-						std::string newFollowedUsername(payload); //copying char array into proper std::string type
-						
-						int status = masterTable->followUser(newFollowedUsername, currentUser);
-						switch(status){
-							case 0:
-								// TODO avisar usuario q ta tudo bem
-								std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-								break;
-							case -1:
-								// user does not exist
-								// TODO avisar usuario
-								printf("ERROR: user does not exist.\n"); fflush(stdout);
-								break;
-							case -2:
-								// TODO avisar usuario
-								printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
-								break;
-							case -3:
-								// TODO avisar usuario
-								std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-								break;
+						case TYPE_FOLLOW:
+						{
+							std::string newFollowedUsername(payload); //copying char array into proper std::string type
+							
+							int status = masterTable->followUser(newFollowedUsername, currentUser);
+							switch(status){
+								case 0:
+									// TODO avisar usuario q ta tudo bem
+									send_ack_to_client(socket, reference_seqn);
+									std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+									break;
+								case -1:
+									// user does not exist
+									snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
+									send_error_to_client(socket, reference_seqn, payload);
+									printf("ERROR: user does not exist.\n"); fflush(stdout);
+									break;
+								case -2:
+									snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
+									send_error_to_client(socket, reference_seqn, payload);								printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
+									break;
+								case -3:
+									snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
+									send_error_to_client(socket, reference_seqn, payload);
+									std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+									break;
+							}
+							break;
 						}
-						break;
-					}
-					case TYPE_SEND:
-					{
-						std::string message(payload); //copying char array into proper std::string type
-						masterTable->sendMessageToFollowers(currentUser, message);
-						break;
-					}
-					case TYPE_DISCONNECT:
-					{
-						// TODO mandar mensagem pro usuario quando ele se desconectar
-						currentRow = masterTable->getRow(currentUser);
-						currentRow->closeSession();
-						std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
-						if (shutdown(socket, SHUT_RDWR) !=0 ) {
-							std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
+						case TYPE_SEND:
+						{
+							std::string message(payload); //copying char array into proper std::string type
+							masterTable->sendMessageToFollowers(currentUser, message);
+							// TODO retornar ACk pro cliente
+							send_ack_to_client(socket, reference_seqn);
+							break;
 						}
-						close(socket);
-						pthread_exit(NULL);
-						break;
+						case TYPE_DISCONNECT:
+						{
+							// TODO mandar mensagem pro usuario quando ele se desconectar
+							currentRow = masterTable->getRow(currentUser);
+							currentRow->closeSession();
+							std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
+							if (shutdown(socket, SHUT_RDWR) !=0 ) {
+								std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
+							}
+							send_ack_to_client(socket, reference_seqn);
+							close(socket);
+							pthread_exit(NULL);
+							break;
+						}
+						}
 					}
 				}
-			}
 		}
 
 		// send message, if there is any
