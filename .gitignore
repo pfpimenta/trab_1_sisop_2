@@ -41,3 +41,6 @@ backup_table.txt
 
 # Misc
 .directory
+
+# ide files
+.vscode
