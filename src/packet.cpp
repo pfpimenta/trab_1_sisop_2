@@ -11,7 +11,6 @@ packet create_packet(char* message, int packet_type, int seqn)
   return packet_to_send;
 }
 
-
 // serializes the packet and puts it in the buffer
 void serialize_packet(packet packet_to_send, char* buffer)
 {
@@ -20,8 +19,7 @@ void serialize_packet(packet packet_to_send, char* buffer)
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
 
-void print_packet(packet packet)
-{
+void print_packet(packet packet) {
   printf("Reference seqn: %i \n", packet.seqn);
   printf("Payload length: %i \n", packet.length);
   printf("Packet type: %i \n", packet.type);
@@ -29,7 +27,7 @@ void print_packet(packet packet)
   fflush(stdout);
 }
 
-packet buffer_to_packet(char* buffer){
+packet buffer_to_packet(char* buffer) {
   packet packet;
   char payload[PAYLOAD_SIZE];
 
@@ -39,10 +37,13 @@ packet buffer_to_packet(char* buffer){
   char* token;
   const char delimiter[2] = ",";
   char* rest = buffer;
-
+  
   //seqn
   token = strtok_r(rest, delimiter, &rest);
-  packet.seqn = atoi(token);
+  printf("DEBUG buffer_to_packet 1 \n"); fflush(stdout);
+  // TODO: SEGFAULT vem logo apos esse print
+  packet.seqn = atoi(token); // TODO SEGFAULT AQUI !!!! 
+  printf("DEBUG buffer_to_packet 2 \n"); fflush(stdout);
 
   //payload_length
   token = strtok_r(rest, delimiter, &rest);
@@ -51,6 +52,7 @@ packet buffer_to_packet(char* buffer){
   //packet_type
   token = strtok_r(rest, delimiter, &rest);
   packet.type = atoi(token);
+
 
   //payload (get whatever else is in there)
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
@@ -62,8 +64,6 @@ packet buffer_to_packet(char* buffer){
 
   return packet;
 }
-
-
 
 const char* get_packet_type_string(int packet_type)
 {

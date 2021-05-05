@@ -16,6 +16,8 @@
 
 #include "../include/packet.hpp"
 
+#define MAX_TRIES 3
+
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
@@ -55,7 +57,6 @@ typedef struct __communication_params{
   int port;
 } communication_params;
 
-
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
 
@@ -70,15 +71,31 @@ void write_message(int socketfd, char* message)
 }
 
 // reads a message from a socket (receives a message through it)
-void read_message(int socketfd, char* buffer)
+int read_message(int socketfd, char* buffer)
 {
 	// make sure buffer is clear	
   bzero(buffer, BUFFER_SIZE);
 	/* read from the socket */
   int n;
 	n = read(socketfd, buffer, BUFFER_SIZE);
-	if (n < 0) 
+	if (n < 0) {
 		printf("ERROR reading from socket\n");
+    return -1;
+  } else {
+    return 0; // received message in buffer
+  }
+}
+
+// reads a message from a socket (receives a message through it) (BLOCKING VERSION)
+void blocking_read_message(int socketfd, char* buffer)
+{
+	// make sure buffer is clear	
+  bzero(buffer, BUFFER_SIZE);
+	/* read from the socket */
+  int n;
+	do{
+    n = read(socketfd, buffer, BUFFER_SIZE);
+  } while(n < 0);
 }
 
 int setup_socket(communication_params params)
@@ -112,32 +129,65 @@ int setup_socket(communication_params params)
   return socketfd;
 }
 
-void send_connect_message(int socketfd, char* profile_name)
+int send_connect_message(int socketfd, char* profile_name)
 {
   char buffer[BUFFER_SIZE];
   char payload[PAYLOAD_SIZE];
-  packet packet_to_send;
+  packet packet_to_send, packet_received;
 
   // send CONNECT message
   snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
   packet_to_send = create_packet(payload, 0, seqn);
-  seqn++;
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
-  sleep(1);
+
+  // receive ACK or ERROR
+  blocking_read_message(socketfd, buffer);
+  packet_received = buffer_to_packet(buffer);
+  if(packet_received.type == TYPE_ACK)
+  {
+    // successfully connected!
+    seqn++;
+    return 0;
+  } else if (packet_received.type == TYPE_ERROR) {
+    // server sent ERROR code while trying to connect
+    printf(ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload);
+    return -1;
+  } else {
+    // packet type not recognized
+    printf("ERROR: received %u code from server.\n", packet_received.type);
+    return -1;
+  }
 }
 
-void send_follow_message(int socketfd, char* profile_name)
-{
-  char buffer[BUFFER_SIZE];
-  char payload[PAYLOAD_SIZE];
-  packet packet_to_send;
+int send_message(int socketfd, char* buffer) {
+  int status;
+  packet packet_received;
+  int tries = 0;
+  while(tries < MAX_TRIES){
+    write_message(socketfd, buffer);
 
-  snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
-  packet_to_send = create_packet(payload, 1, seqn);
-  seqn++;
-  serialize_packet(packet_to_send, buffer);
-  write_message(socketfd, buffer);
+    // receive ACK or ERROR
+    sleep(1);
+    status = read_message(socketfd, buffer);
+    if(status == 0){
+      packet_received = buffer_to_packet(buffer);
+      if(packet_received.type == TYPE_ACK)
+      {
+        return 0;
+      } else if (packet_received.type == TYPE_ERROR) {
+        printf(ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload); fflush(stdout);
+        tries++;
+        continue;
+      } else {
+        // packet type not recognized
+        printf("ERROR: received %u code from server.\n", packet_received.type); fflush(stdout);
+        tries++;
+        continue;
+      }
+    }
+  }
+  return -1;
 }
 
 void print_commands()
@@ -154,14 +204,15 @@ void communication_loop(int socketfd)
     char buffer[BUFFER_SIZE];
     char payload[PAYLOAD_SIZE];
     packet packet;
+    int status;
 
-		do {
+		while (get_termination_signal() == false){
       // se tem mensagem recebida, prints it to the client
       memset(buffer, 0, sizeof buffer);
       int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
       if(size > 0) //(size != -1)
       {
-        //put the message in a packet
+        // put the message in a packet
         packet = buffer_to_packet(buffer);
         // put the packet in the received FIFO
         pthread_mutex_lock(&packets_received_mutex);
@@ -173,17 +224,22 @@ void communication_loop(int socketfd)
       pthread_mutex_lock(&packets_to_send_mutex);
       if(!packets_to_send_fifo.empty())
       {
-        // get the packet
-        packet = packets_to_send_fifo.front();
-        packets_to_send_fifo.pop_front();
-
         // serialize and send the packet
+        packet = packets_to_send_fifo.front();
         serialize_packet(packet, buffer);
 
-        write_message(socketfd, buffer);
+        // try to send message
+        status = send_message(socketfd, buffer);
+        if(status == 0) {
+          // success
+          packets_to_send_fifo.pop_front();
+          seqn++;
+        } else {
+          set_termination_signal(true);
+        }
       }
       pthread_mutex_unlock(&packets_to_send_mutex);
-    } while (get_termination_signal() == false);
+    }
 
     printf("\nClosing server connection...\nTerminating client....\n");
     // Send a DISCONNECT packet
@@ -207,7 +263,13 @@ void * communication_thread(void *arg) {
 
   // setup socket and send CONNECT message
   socketfd = setup_socket(params);
-  send_connect_message(socketfd, params.profile_name);
+  int status = -1;
+  int num_tries = 0;
+  while(status != 0 || num_tries > MAX_TRIES){
+    status = send_connect_message(socketfd, params.profile_name);
+    num_tries++;
+    sleep(1);
+  }
 
   communication_loop(socketfd);
 
