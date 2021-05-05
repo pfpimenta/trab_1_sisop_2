@@ -53,7 +53,6 @@ packet buffer_to_packet(char* buffer) {
   token = strtok_r(rest, delimiter, &rest);
   packet.type = atoi(token);
 
-
   //payload (get whatever else is in there)
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
   token = strtok_r(rest, "", &rest);

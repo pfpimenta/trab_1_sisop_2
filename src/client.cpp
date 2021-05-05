@@ -64,8 +64,9 @@ std::list<packet> packets_received_fifo;
 void write_message(int socketfd, char* message)
 {
 	/* write in the socket */
-    int n;
+  int n;
 	n = write(socketfd, message, strlen(message));
+  printf("n : %d", n);
 	if (n < 0) 
 		printf("ERROR writing to socket\n");
 }
@@ -78,7 +79,7 @@ int read_message(int socketfd, char* buffer)
 	/* read from the socket */
   int n;
 	n = read(socketfd, buffer, BUFFER_SIZE);
-	if (n < 0) {
+	if (n <= 0) {
 		printf("ERROR reading from socket\n");
     return -1;
   } else {
@@ -164,28 +165,32 @@ int send_message(int socketfd, char* buffer) {
   int status;
   packet packet_received;
   int tries = 0;
+  char server_message[BUFFER_SIZE];
+
   while(tries < MAX_TRIES){
-    write_message(socketfd, buffer);
+    printf("DEBUG send_message 00 tries: %d\n", tries);
+    // TODO segfault: reescrever a mensagem em buffer (ou usar uma deep copy)
+    write_message(socketfd, buffer); // TODO isso causa o segfault
+    printf("DEBUG after write\n");
 
     // receive ACK or ERROR
     sleep(1);
-    status = read_message(socketfd, buffer);
+    status = read_message(socketfd, server_message);
+    printf("DEBUG send_message 12312412 status: %d\n", status);
     if(status == 0){
-      packet_received = buffer_to_packet(buffer);
+      packet_received = buffer_to_packet(server_message);
       if(packet_received.type == TYPE_ACK)
       {
         return 0;
       } else if (packet_received.type == TYPE_ERROR) {
         printf(ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload); fflush(stdout);
-        tries++;
-        continue;
       } else {
         // packet type not recognized
         printf("ERROR: received %u code from server.\n", packet_received.type); fflush(stdout);
-        tries++;
-        continue;
       }
     }
+    tries++;
+    printf("DEBUG send_message 2 status: %d\n", status);
   }
   return -1;
 }
