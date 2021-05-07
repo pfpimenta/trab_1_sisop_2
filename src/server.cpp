@@ -58,6 +58,17 @@ void set_termination_signal(){
   pthread_mutex_unlock(&termination_signal_mutex);
 }
 
+// TODO put in a CPP file shared with client.cpp
+void set_socket__to_non_blocking_mode(int socketfd) {
+	int flags = fcntl(socketfd, F_GETFL);
+	if (flags == -1) {
+		printf("FAILED getting socket flags.\n");
+	}
+	flags = flags | O_NONBLOCK;
+	if (fcntl(socketfd, F_SETFL, flags) != 0) {
+		printf("FAILED setting socket to NON-BLOCKING mode.\n");
+	}
+}
 
 void closeConnection(int socket, int thread_id)
 {
@@ -128,6 +139,29 @@ int accept_connection(int sockfd)
 	return newsockfd;
 }
 
+// reads a message from a socket (receives a message through it) (BLOCKING VERSION)
+void blocking_read_message(int socketfd, char* buffer)
+{
+	// make sure buffer is clear	
+  bzero(buffer, BUFFER_SIZE);
+	/* read from the socket */
+  int n;
+	do{
+    n = read(socketfd, buffer, BUFFER_SIZE);
+  } while(n < 0);
+}
+
+int receive_ack(int socket, int seqn){
+	char buffer[BUFFER_SIZE];
+	packet packet_received;
+	blocking_read_message(socket, buffer);
+	packet_received = buffer_to_packet(buffer);
+	if(packet_received.seqn == seqn && packet_received.type == TYPE_ACK){
+		return 0;
+	} else {
+		return -1;
+	}
+}
 
 void send_ack_to_client(int socket, int reference_seqn)
 {
@@ -139,7 +173,6 @@ void send_ack_to_client(int socket, int reference_seqn)
 	write_message(socket, buffer);
 }
 
-
 void send_error_to_client(int socket, int reference_seqn, char* error_message)
 {
 	char buffer[BUFFER_SIZE];
@@ -148,37 +181,51 @@ void send_error_to_client(int socket, int reference_seqn, char* error_message)
 	write_message(socket, buffer);
 }
 
+int send_notification(int socket, Row* currentRow, int seqn) {
+	packet packet_to_send;
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	std::string notification;
+	int status;
+
+	notification = currentRow->getNotification();
+	strcpy(payload, notification.c_str());
+	packet_to_send = create_packet(payload, 0, seqn);
+	serialize_packet(packet_to_send, buffer);
+	write_message(socket, buffer);
+	status = receive_ack(socket, seqn);
+	if(status == 0){
+		currentRow->popNotification();
+		seqn++;
+	} else {
+		printf("ERROR : did not receive ACK from client");
+	}
+	return seqn;
+}
 
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int size = 0;
 	int seqn = 0;
-	int reference_seqn = 0;
+	int status;
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
 	char payload[PAYLOAD_SIZE];
 	char client_message[BUFFER_SIZE];
 	char buffer[BUFFER_SIZE];
-	int message_type = -1;
-	int payload_length = -1;
 	Row* currentRow;
 	std::string currentUser = "not-connected";
 	std::string notification;
 	
 	packet packet_to_send;
+	packet received_packet;
 
 	// print pthread id
 	pthread_t thread_id = pthread_self();
 
-	int flags = fcntl(socket, F_GETFL);
-	if (flags == -1) {
-		printf("FAILED getting socket flags.\n");
-	}
+	// setting socket to NON-BLOCKING mode
+	set_socket__to_non_blocking_mode(socket);
 
-	flags = flags | O_NONBLOCK;
-	if (fcntl(socket, F_SETFL, flags) != 0) {
-		printf("FAILED setting socket to NON-BLOCKING mode.\n");
-	}
 	// zero-fill the buffer
 	memset(client_message, 0, sizeof client_message);
 
@@ -186,8 +233,6 @@ void * socket_thread(void *arg) {
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			memset(payload, 0, sizeof payload); //clear payload buffer
-
 			client_message[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
@@ -195,39 +240,19 @@ void * socket_thread(void *arg) {
   			char* rest_packet = client_message;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
-				// PARSE:
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
-				char* token;
-				char* rest = buffer;
-				const char delimiter[2] = ",";
+				received_packet = buffer_to_packet(buffer);
 
-				//seqn
-				token = strtok_r(rest, delimiter, &rest);
-				reference_seqn = atoi(token);
-
-				//payload_length
-				token = strtok_r(rest, delimiter, &rest);
-				payload_length = atoi(token);
-				
-
-				//packet_type
-				token = strtok_r(rest, delimiter, &rest);
-				message_type = atoi(token);
-
-				//payload (get whatever else is in there up to '\n')
-				token = strtok_r(rest, "\n", &rest);
-				strncpy(payload, token, payload_length);
-
-				if(reference_seqn <= max_reference_seqn){
+				if(received_packet.seqn <= max_reference_seqn){
 					// already received this message
 					// TODO
-					send_ack_to_client(socket, reference_seqn);
+					send_ack_to_client(socket, received_packet.seqn);
 				} else {
-					max_reference_seqn = reference_seqn;
-					switch (message_type) {
+					max_reference_seqn = received_packet.seqn;
+					switch (received_packet.type) {
 						case TYPE_CONNECT:
 						{
-							std::string username(payload); //copying char array into proper std::string type
+							std::string username(received_packet._payload); //copying char array into proper std::string type
 							currentUser = username;
 
 							// check if map already has the username in there before inserting
@@ -239,12 +264,12 @@ void * socket_thread(void *arg) {
 							if(currentRow->connectUser())
 							{
 								// TODO mandar mensagem pro cliente : sucesso!
-								send_ack_to_client(socket, reference_seqn);
+								send_ack_to_client(socket, received_packet.seqn);
 								std::cout << " connected." << std::endl;
 							} else{
 								// TODO mandar mensagem pro cliente avisando q ele atingiu o limite
 								snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
-								send_error_to_client(socket, reference_seqn, payload);
+								send_error_to_client(socket, received_packet.seqn, payload);
 								printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
 								closeConnection(socket, (int)thread_id);
 							}
@@ -252,28 +277,29 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_FOLLOW:
 						{
-							std::string newFollowedUsername(payload); //copying char array into proper std::string type
+							std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
 							
 							int status = masterTable->followUser(newFollowedUsername, currentUser);
 							switch(status){
 								case 0:
 									// TODO avisar usuario q ta tudo bem
-									send_ack_to_client(socket, reference_seqn);
+									send_ack_to_client(socket, received_packet.seqn);
 									std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 									break;
 								case -1:
 									// user does not exist
 									snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
-									send_error_to_client(socket, reference_seqn, payload);
+									send_error_to_client(socket, received_packet.seqn, payload);
 									printf("ERROR: user does not exist.\n"); fflush(stdout);
 									break;
 								case -2:
 									snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
-									send_error_to_client(socket, reference_seqn, payload);								printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
+									send_error_to_client(socket, received_packet.seqn, payload);
+									printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
 									break;
 								case -3:
 									snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
-									send_error_to_client(socket, reference_seqn, payload);
+									send_error_to_client(socket, received_packet.seqn, payload);
 									std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 									break;
 							}
@@ -281,10 +307,9 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_SEND:
 						{
-							std::string message(payload); //copying char array into proper std::string type
+							std::string message(received_packet._payload); //copying char array into proper std::string type
 							masterTable->sendMessageToFollowers(currentUser, message);
-							// TODO retornar ACk pro cliente
-							send_ack_to_client(socket, reference_seqn);
+							send_ack_to_client(socket, received_packet.seqn);
 							break;
 						}
 						case TYPE_DISCONNECT:
@@ -296,7 +321,7 @@ void * socket_thread(void *arg) {
 							if (shutdown(socket, SHUT_RDWR) !=0 ) {
 								std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
 							}
-							send_ack_to_client(socket, reference_seqn);
+							send_ack_to_client(socket, received_packet.seqn);
 							close(socket);
 							pthread_exit(NULL);
 							break;
@@ -316,37 +341,40 @@ void * socket_thread(void *arg) {
 				int activeSessions = currentRow->getActiveSessions();
 				if(activeSessions == 1) {
 					// consume notification and remove it from the FIFO
-					notification = currentRow->popNotification();
-					strcpy(payload, notification.c_str());
-					packet_to_send = create_packet(payload, 0, seqn);
-					seqn++;
-					serialize_packet(packet_to_send, buffer);
-					write_message(socket, buffer);
+					seqn = send_notification(socket, currentRow, seqn);
 				} else if(activeSessions == 2) {
+					// TODO consertar aqui !!! 
 					bool was_notification_delivered = currentRow->get_notification_delivered();
 					if(was_notification_delivered) {
 						// consume notification and remove it from the FIFO
-						notification = currentRow->popNotification();
-						strcpy(payload, notification.c_str());
-						packet_to_send = create_packet(payload, 0, seqn);
-						seqn++;
-						serialize_packet(packet_to_send, buffer);
-						write_message(socket, buffer);
+						seqn = send_notification(socket, currentRow, seqn);
+						currentRow->set_notification_delivered(false);
 					} else {
+						// TODO ver se o server nao pode mandar sem querer 2x a notificacao
+							// pra mesma sessao
 						// consume notification but DO NOT remove it from the FIFO
 						notification = currentRow->getNotification();
 						strcpy(payload, notification.c_str());
 						packet_to_send = create_packet(payload, 0, seqn);
-						seqn++;
 						serialize_packet(packet_to_send, buffer);
 						write_message(socket, buffer);
-						currentRow->set_notification_delivered(true);
-						bool timeout_condition = true;
-						std::time_t start_timestamp = std::time(nullptr);
-						while(currentRow->get_notification_delivered() == true && timeout_condition){
-							std::time_t loop_timestamp = std::time(nullptr);
-							timeout_condition = (loop_timestamp - start_timestamp <= 3);
+
+						// receive ACK or ERROR from client
+						status = receive_ack(socket, seqn);
+						if(status == 0){
+							seqn++;
+							currentRow->set_notification_delivered(true);
+							bool timeout_condition = true;
+							std::time_t start_timestamp = std::time(nullptr);
+							// wait until the other thread sends notification
+							while(currentRow->get_notification_delivered() == true && timeout_condition){
+								std::time_t loop_timestamp = std::time(nullptr);
+								timeout_condition = (loop_timestamp - start_timestamp <= 3);
+							}
+						} else {
+							printf("ERROR : did not receive ACK from client");
 						}
+
 					}
 				}
 			}

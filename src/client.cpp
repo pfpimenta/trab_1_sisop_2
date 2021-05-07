@@ -61,13 +61,17 @@ std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
 
 // writes a message in a socket (sends a message through it)
-void write_message(int socketfd, char* message)
+int write_message(int socketfd, char* message)
 {
 	/* write in the socket */
   int n;
 	n = write(socketfd, message, strlen(message));
-	if (n < 0) 
+	if (n < 0) {
 		printf("ERROR writing to socket\n");
+    return -1;
+  } else {
+    return 0;
+  }
 }
 
 // reads a message from a socket (receives a message through it)
@@ -200,10 +204,11 @@ void send_ack(int socketfd, int reference_seqn) {
   bzero(payload, PAYLOAD_SIZE); // makes sure payload is an empty string
   ack_packet = create_packet(payload, TYPE_ACK, reference_seqn);
   serialize_packet(ack_packet, buffer);
-  status = send_message(socketfd, buffer);
+
+  status = write_message(socketfd, buffer);
   while(status != 0){
       // if send failed, try to send it again
-      status = send_message(socketfd, buffer);
+      status = write_message(socketfd, buffer);
       sleep(3);
   }
 }

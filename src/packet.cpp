@@ -40,10 +40,7 @@ packet buffer_to_packet(char* buffer) {
   
   //seqn
   token = strtok_r(rest, delimiter, &rest);
-  printf("DEBUG buffer_to_packet 1 \n"); fflush(stdout);
-  // TODO: SEGFAULT vem logo apos esse print
-  packet.seqn = atoi(token); // TODO SEGFAULT AQUI !!!! 
-  printf("DEBUG buffer_to_packet 2 \n"); fflush(stdout);
+  packet.seqn = atoi(token);
 
   //payload_length
   token = strtok_r(rest, delimiter, &rest);

@@ -1,3 +1,8 @@
+-> consertar erro: quando um cliente termina o server morre
+	-> desvincular
+
+-> consertar erro: situacao do ACK quando o servidor tem q enviar uma notificacao pra 2 sessoes do mesmo usuario
+
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
 	-> a cada modificação, essa lista é propagada pros backups
 
@@ -30,9 +35,6 @@
 
 -> hook on exit, ctrl+c, ctrl+d (do servidor):
 	-> mandar logout message do servidor pro cliente
-
--> ACKs e ERRORs (enviados pelo cliente e pelo servidor. cliente só vai mandar acks).
-	-> Falta cliente e servidor reconhecer ACK
 
 
 // edge cases:
