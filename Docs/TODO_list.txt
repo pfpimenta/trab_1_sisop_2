@@ -32,5 +32,11 @@
 	-> mandar logout message do servidor pro cliente
 
 -> ACKs e ERRORs (enviados pelo cliente e pelo servidor. cliente só vai mandar acks).
-	-> Falta cliente enviar ACK
 	-> Falta cliente e servidor reconhecer ACK
+
+
+// edge cases:
+-> quando o numero de clientes for grande o suficiente para
+   que as filas de mensagem de cada um demorem mais do que
+   os segundo de sleep para serem lidas
+	-> perda de mensagens

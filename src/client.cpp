@@ -66,7 +66,6 @@ void write_message(int socketfd, char* message)
 	/* write in the socket */
   int n;
 	n = write(socketfd, message, strlen(message));
-  printf("n : %d", n);
 	if (n < 0) 
 		printf("ERROR writing to socket\n");
 }
@@ -167,16 +166,11 @@ int send_message(int socketfd, char* buffer) {
   int tries = 0;
   char server_message[BUFFER_SIZE];
 
+  write_message(socketfd, buffer);
   while(tries < MAX_TRIES){
-    printf("DEBUG send_message 00 tries: %d\n", tries);
-    // TODO segfault: reescrever a mensagem em buffer (ou usar uma deep copy)
-    write_message(socketfd, buffer); // TODO isso causa o segfault
-    printf("DEBUG after write\n");
-
     // receive ACK or ERROR
     sleep(1);
     status = read_message(socketfd, server_message);
-    printf("DEBUG send_message 12312412 status: %d\n", status);
     if(status == 0){
       packet_received = buffer_to_packet(server_message);
       if(packet_received.type == TYPE_ACK)
@@ -184,15 +178,34 @@ int send_message(int socketfd, char* buffer) {
         return 0;
       } else if (packet_received.type == TYPE_ERROR) {
         printf(ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload); fflush(stdout);
+        write_message(socketfd, buffer);
       } else {
         // packet type not recognized
         printf("ERROR: received %u code from server.\n", packet_received.type); fflush(stdout);
       }
+    } else {
+      sleep(3);
     }
     tries++;
-    printf("DEBUG send_message 2 status: %d\n", status);
   }
   return -1;
+}
+
+void send_ack(int socketfd, int reference_seqn) {
+  packet ack_packet;
+  int status;
+  char buffer[BUFFER_SIZE];
+  char payload[PAYLOAD_SIZE];
+
+  bzero(payload, PAYLOAD_SIZE); // makes sure payload is an empty string
+  ack_packet = create_packet(payload, TYPE_ACK, reference_seqn);
+  serialize_packet(ack_packet, buffer);
+  status = send_message(socketfd, buffer);
+  while(status != 0){
+      // if send failed, try to send it again
+      status = send_message(socketfd, buffer);
+      sleep(3);
+  }
 }
 
 void print_commands()
@@ -223,6 +236,8 @@ void communication_loop(int socketfd)
         pthread_mutex_lock(&packets_received_mutex);
         packets_received_fifo.push_back(packet);
         pthread_mutex_unlock(&packets_received_mutex);
+        // send ACK
+        send_ack(socketfd, packet.seqn);
       }
 
       // send packet to server, if there is any
@@ -240,7 +255,8 @@ void communication_loop(int socketfd)
           packets_to_send_fifo.pop_front();
           seqn++;
         } else {
-          set_termination_signal(true);
+          printf("ERROR: failed to send message... trying again soon...\n");
+          sleep(1);
         }
       }
       pthread_mutex_unlock(&packets_to_send_mutex);

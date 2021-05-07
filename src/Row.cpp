@@ -105,10 +105,10 @@ bool Row::hasNewNotification(){
 
 // removes a notification from the list and return it
 std::string Row::popNotification() {
-	this->shared_reader_lock();
+	pthread_mutex_lock(&(this->read_write_mutex));
 	std::string notification = this->messages_to_receive.front();
 	this->messages_to_receive.pop_front();
-	this->shared_reader_unlock();
+	pthread_mutex_unlock(&(this->read_write_mutex));
 	this->set_notification_delivered(false);
 	return notification;
 }
