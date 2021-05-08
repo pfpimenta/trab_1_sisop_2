@@ -23,7 +23,7 @@ void print_packet(packet packet) {
   printf("Reference seqn: %i \n", packet.seqn);
   printf("Payload length: %i \n", packet.length);
   printf("Packet type: %i - %s\n", packet.type, get_packet_type_string(packet.type));
-  printf("Payload: %s \n", packet._payload);
+  printf("Payload: %s \n\n", packet._payload);
   fflush(stdout);
 }
 

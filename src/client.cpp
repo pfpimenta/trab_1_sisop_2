@@ -182,6 +182,7 @@ int send_message(int socketfd, char* buffer) {
       {
         return 0;
       } else if (packet_received.type == TYPE_ERROR) {
+        // received error from server... try to send the message again
         printf(ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "\n", packet_received._payload); fflush(stdout);
         write_message(socketfd, buffer);
       } else {
@@ -197,7 +198,6 @@ int send_message(int socketfd, char* buffer) {
 }
 
 void send_ack(int socketfd, int reference_seqn) {
-  printf("DEBUG sending ACK! !! !!\n");
   packet ack_packet;
   int status;
   char buffer[BUFFER_SIZE];
@@ -230,20 +230,24 @@ void communication_loop(int socketfd)
     char payload[PAYLOAD_SIZE];
     packet packet;
     int status;
+    int max_reference_seqn = -1;
 
 		while (get_termination_signal() == false){
       // se tem mensagem recebida, prints it to the client
       memset(buffer, 0, sizeof buffer);
       int size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
-      if(size > 0) //(size != -1)
+      if(size > 0)
       {
         // put the message in a packet
         packet = buffer_to_packet(buffer);
-        print_packet(packet); // DEBUG
-        // put the packet in the received FIFO
-        pthread_mutex_lock(&packets_received_mutex);
-        packets_received_fifo.push_back(packet);
-        pthread_mutex_unlock(&packets_received_mutex);
+        if(packet.seqn > max_reference_seqn) 
+        {
+          // put the packet in the received FIFO
+          pthread_mutex_lock(&packets_received_mutex);
+          packets_received_fifo.push_back(packet);
+          pthread_mutex_unlock(&packets_received_mutex);
+          max_reference_seqn = packet.seqn;
+        }
         // send ACK
         send_ack(socketfd, packet.seqn);
       }
@@ -254,7 +258,6 @@ void communication_loop(int socketfd)
       {
         // serialize and send the packet
         packet = packets_to_send_fifo.front();
-        print_packet(packet);
         serialize_packet(packet, buffer);
 
         // try to send message
@@ -264,7 +267,7 @@ void communication_loop(int socketfd)
           packets_to_send_fifo.pop_front();
           seqn++;
         } else {
-          printf("ERROR: failed to send message... trying again soon...\n");
+          printf("ERROR: failed to send message...\n");
           sleep(1);
         }
       }

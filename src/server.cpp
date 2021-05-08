@@ -32,6 +32,7 @@ pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define MAX_THREADS 30 // maximum number of threads allowed
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
+#define MAX_TRIES 3 // maximum number of tries to send a notification to a client
 
 #define TYPE_CONNECT 0
 #define TYPE_FOLLOW 1
@@ -159,7 +160,6 @@ int receive_ack(int socket, int seqn){
 	if(packet_received.seqn == seqn && packet_received.type == TYPE_ACK){
 		return 0;
 	} else {
-		// (packet_received TODO
 		return -1;
 	}
 }
@@ -196,14 +196,6 @@ int send_notification(int socket, Row* currentRow, int seqn) {
 	serialize_packet(packet_to_send, buffer);
 	write_message(socket, buffer);
 
-	// // receive ACK
-	// status = receive_ack(socket, seqn);
-	// if(status == 0){
-	// 	currentRow->popNotification();
-	// 	seqn++;
-	// } else {
-	// 	printf("ERROR : did not receive ACK from client");
-	// }
 	return seqn;
 }
 
@@ -249,19 +241,14 @@ void * socket_thread(void *arg) {
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 
-				print_packet(received_packet); // DEBUG
-
-				if(received_packet.seqn <= max_reference_seqn){
-					printf("DEBUG received_packet.seqn <= max_reference_seqn\n");
+				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
 					// already received this message
-					// TODO
 					send_ack_to_client(socket, received_packet.seqn);
 				} else {
-					printf("DEBUG received_packet.type : %i \n", received_packet.type);
-					max_reference_seqn = received_packet.seqn;
 					switch (received_packet.type) {
 						case TYPE_CONNECT:
 						{
+							max_reference_seqn = received_packet.seqn;
 							std::string username(received_packet._payload); //copying char array into proper std::string type
 							currentUser = username;
 
@@ -273,11 +260,9 @@ void * socket_thread(void *arg) {
 							
 							if(currentRow->connectUser())
 							{
-								// TODO mandar mensagem pro cliente : sucesso!
 								send_ack_to_client(socket, received_packet.seqn);
 								std::cout << " connected." << std::endl;
 							} else{
-								// TODO mandar mensagem pro cliente avisando q ele atingiu o limite
 								snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
 								send_error_to_client(socket, received_packet.seqn, payload);
 								printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
@@ -287,12 +272,12 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_FOLLOW:
 						{
+							max_reference_seqn = received_packet.seqn;
 							std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
 							
 							int status = masterTable->followUser(newFollowedUsername, currentUser);
 							switch(status){
 								case 0:
-									// TODO avisar usuario q ta tudo bem
 									send_ack_to_client(socket, received_packet.seqn);
 									std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 									break;
@@ -317,6 +302,7 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_SEND:
 						{
+							max_reference_seqn = received_packet.seqn;
 							std::string message(received_packet._payload); //copying char array into proper std::string type
 							masterTable->sendMessageToFollowers(currentUser, message);
 							send_ack_to_client(socket, received_packet.seqn);
@@ -324,6 +310,7 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_DISCONNECT:
 						{
+							max_reference_seqn = received_packet.seqn;
 							// TODO mandar mensagem pro usuario quando ele se desconectar
 							currentRow = masterTable->getRow(currentUser);
 							currentRow->closeSession();
@@ -338,13 +325,7 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
-							printf("DEBUG received ACK!\n");
-							print_packet(received_packet);
-  							printf("DEBUG current seqn: %i \n", seqn);
-							printf("\n\n");
-							// TODO
 							if(received_packet.seqn == seqn){
-								printf("OK bate\n"); fflush(stdout);
 								currentRow = masterTable->getRow(currentUser);
 								int activeSessions = currentRow->getActiveSessions();
 								if(activeSessions == 1) {
@@ -411,28 +392,11 @@ void * socket_thread(void *arg) {
 						serialize_packet(packet_to_send, buffer);
 						write_message(socket, buffer);
 						send_tries++;
-
-						// receive ACK or ERROR from client
-						// status = receive_ack(socket, seqn);
-						// if(status == 0){
-						// 	seqn++;
-						// 	currentRow->set_notification_delivered(true);
-						// 	bool timeout_condition = true;
-						// 	std::time_t start_timestamp = std::time(nullptr);
-						// 	// wait until the other thread sends notification
-						// 	while(currentRow->get_notification_delivered() == true && timeout_condition){
-						// 		std::time_t loop_timestamp = std::time(nullptr);
-						// 		timeout_condition = (loop_timestamp - start_timestamp <= 3);
-						// 	}
-						// } else {
-						// 	printf("ERROR : did not receive ACK from client");
-						// }
-
 					}
 				}
 			}
 		}
-  	}while (get_termination_signal() == false);
+  	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	currentRow->closeSession();
