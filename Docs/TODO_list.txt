@@ -1,5 +1,3 @@
--> consertar erro: situacao do ACK quando o servidor tem q enviar uma notificacao pra 2 sessoes do mesmo usuario
-
 -> refatorar socket_thread no server
 
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
