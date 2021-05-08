@@ -143,12 +143,12 @@ int accept_connection(int sockfd)
 void blocking_read_message(int socketfd, char* buffer)
 {
 	// make sure buffer is clear	
-  bzero(buffer, BUFFER_SIZE);
+	bzero(buffer, BUFFER_SIZE);
 	/* read from the socket */
-  int n;
+	int n;
 	do{
-    n = read(socketfd, buffer, BUFFER_SIZE);
-  } while(n < 0);
+		n = read(socketfd, buffer, BUFFER_SIZE);
+	} while(n < 0);
 }
 
 int receive_ack(int socket, int seqn){
@@ -159,6 +159,7 @@ int receive_ack(int socket, int seqn){
 	if(packet_received.seqn == seqn && packet_received.type == TYPE_ACK){
 		return 0;
 	} else {
+		// (packet_received TODO
 		return -1;
 	}
 }
@@ -188,24 +189,29 @@ int send_notification(int socket, Row* currentRow, int seqn) {
 	std::string notification;
 	int status;
 
+	// send notification
 	notification = currentRow->getNotification();
 	strcpy(payload, notification.c_str());
-	packet_to_send = create_packet(payload, 0, seqn);
+	packet_to_send = create_packet(payload, TYPE_MSG, seqn);
 	serialize_packet(packet_to_send, buffer);
 	write_message(socket, buffer);
-	status = receive_ack(socket, seqn);
-	if(status == 0){
-		currentRow->popNotification();
-		seqn++;
-	} else {
-		printf("ERROR : did not receive ACK from client");
-	}
+
+	// // receive ACK
+	// status = receive_ack(socket, seqn);
+	// if(status == 0){
+	// 	currentRow->popNotification();
+	// 	seqn++;
+	// } else {
+	// 	printf("ERROR : did not receive ACK from client");
+	// }
 	return seqn;
 }
 
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
+	bool waiting_for_ack = false;
 	int socket = *((int *)arg);
+	int send_tries = 0;
 	int size = 0;
 	int seqn = 0;
 	int status;
@@ -243,11 +249,15 @@ void * socket_thread(void *arg) {
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 
+				print_packet(received_packet); // DEBUG
+
 				if(received_packet.seqn <= max_reference_seqn){
+					printf("DEBUG received_packet.seqn <= max_reference_seqn\n");
 					// already received this message
 					// TODO
 					send_ack_to_client(socket, received_packet.seqn);
 				} else {
+					printf("DEBUG received_packet.type : %i \n", received_packet.type);
 					max_reference_seqn = received_packet.seqn;
 					switch (received_packet.type) {
 						case TYPE_CONNECT:
@@ -326,10 +336,50 @@ void * socket_thread(void *arg) {
 							pthread_exit(NULL);
 							break;
 						}
+						case TYPE_ACK:
+						{
+							printf("DEBUG received ACK!\n");
+							print_packet(received_packet);
+  							printf("DEBUG current seqn: %i \n", seqn);
+							printf("\n\n");
+							// TODO
+							if(received_packet.seqn == seqn){
+								printf("OK bate\n"); fflush(stdout);
+								currentRow = masterTable->getRow(currentUser);
+								int activeSessions = currentRow->getActiveSessions();
+								if(activeSessions == 1) {
+									currentRow->popNotification();
+									seqn++;
+								} else { // 2 active sessions
+									// TODO consertar problema de mutex
+									bool was_notification_delivered = currentRow->get_notification_delivered();
+									if(was_notification_delivered) {
+										// one notification was delivered for now
+										currentRow->popNotification();
+										seqn++;
+									} else {
+										// no notification was delivered yet
+										seqn++;
+										currentRow->set_notification_delivered(true);
+										bool timeout_condition = false;
+										std::time_t start_timestamp = std::time(nullptr);
+										// wait until the other thread sends notification
+										while(currentRow->get_notification_delivered() == true && !timeout_condition){
+											std::time_t loop_timestamp = std::time(nullptr);
+											timeout_condition = !(loop_timestamp - start_timestamp <= 3);
+										}
+									}
+								}
+								send_tries = 0; // reset this counter
+							}
+							break;
+						}
 						}
 					}
 				}
 		}
+
+		sleep(1);
 
 		// send message, if there is any
 		if(currentUser != "not-connected") // if the user has already connected
@@ -342,13 +392,15 @@ void * socket_thread(void *arg) {
 				if(activeSessions == 1) {
 					// consume notification and remove it from the FIFO
 					seqn = send_notification(socket, currentRow, seqn);
+					send_tries++;
 				} else if(activeSessions == 2) {
-					// TODO consertar aqui !!! 
+					// TODO consertar aqui !!! botar um lock
 					bool was_notification_delivered = currentRow->get_notification_delivered();
 					if(was_notification_delivered) {
 						// consume notification and remove it from the FIFO
 						seqn = send_notification(socket, currentRow, seqn);
-						currentRow->set_notification_delivered(false);
+						send_tries ++;
+						// currentRow->set_notification_delivered(false);
 					} else {
 						// TODO ver se o server nao pode mandar sem querer 2x a notificacao
 							// pra mesma sessao
@@ -358,22 +410,23 @@ void * socket_thread(void *arg) {
 						packet_to_send = create_packet(payload, 0, seqn);
 						serialize_packet(packet_to_send, buffer);
 						write_message(socket, buffer);
+						send_tries++;
 
 						// receive ACK or ERROR from client
-						status = receive_ack(socket, seqn);
-						if(status == 0){
-							seqn++;
-							currentRow->set_notification_delivered(true);
-							bool timeout_condition = true;
-							std::time_t start_timestamp = std::time(nullptr);
-							// wait until the other thread sends notification
-							while(currentRow->get_notification_delivered() == true && timeout_condition){
-								std::time_t loop_timestamp = std::time(nullptr);
-								timeout_condition = (loop_timestamp - start_timestamp <= 3);
-							}
-						} else {
-							printf("ERROR : did not receive ACK from client");
-						}
+						// status = receive_ack(socket, seqn);
+						// if(status == 0){
+						// 	seqn++;
+						// 	currentRow->set_notification_delivered(true);
+						// 	bool timeout_condition = true;
+						// 	std::time_t start_timestamp = std::time(nullptr);
+						// 	// wait until the other thread sends notification
+						// 	while(currentRow->get_notification_delivered() == true && timeout_condition){
+						// 		std::time_t loop_timestamp = std::time(nullptr);
+						// 		timeout_condition = (loop_timestamp - start_timestamp <= 3);
+						// 	}
+						// } else {
+						// 	printf("ERROR : did not receive ACK from client");
+						// }
 
 					}
 				}

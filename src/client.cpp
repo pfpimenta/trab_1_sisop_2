@@ -177,6 +177,7 @@ int send_message(int socketfd, char* buffer) {
     status = read_message(socketfd, server_message);
     if(status == 0){
       packet_received = buffer_to_packet(server_message);
+      print_packet(packet_received);
       if(packet_received.type == TYPE_ACK)
       {
         return 0;
@@ -196,6 +197,7 @@ int send_message(int socketfd, char* buffer) {
 }
 
 void send_ack(int socketfd, int reference_seqn) {
+  printf("DEBUG sending ACK! !! !!\n");
   packet ack_packet;
   int status;
   char buffer[BUFFER_SIZE];
@@ -237,6 +239,7 @@ void communication_loop(int socketfd)
       {
         // put the message in a packet
         packet = buffer_to_packet(buffer);
+        print_packet(packet); // DEBUG
         // put the packet in the received FIFO
         pthread_mutex_lock(&packets_received_mutex);
         packets_received_fifo.push_back(packet);
@@ -251,6 +254,7 @@ void communication_loop(int socketfd)
       {
         // serialize and send the packet
         packet = packets_to_send_fifo.front();
+        print_packet(packet);
         serialize_packet(packet, buffer);
 
         // try to send message
