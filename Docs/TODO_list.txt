@@ -1,6 +1,3 @@
--> consertar erro: quando um cliente termina o server morre
-	-> desvincular
-
 -> consertar erro: situacao do ACK quando o servidor tem q enviar uma notificacao pra 2 sessoes do mesmo usuario
 
 -> refatorar socket_thread no server
@@ -32,6 +29,9 @@
 	-> servidores backup pro servidor primario
 
 -> algoritmo de eleiçao (bully)
+
+-> ao eleger um novo servidor primario
+	-> checar se cada sessao continua viva
 
 -> cliente: espera a resposta antes de enviar a proxima mensagem
 

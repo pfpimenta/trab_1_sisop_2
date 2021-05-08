@@ -318,7 +318,6 @@ void * socket_thread(void *arg) {
 							if (shutdown(socket, SHUT_RDWR) !=0 ) {
 								std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
 							}
-							send_ack_to_client(socket, received_packet.seqn);
 							close(socket);
 							pthread_exit(NULL);
 							break;
