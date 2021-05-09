@@ -199,6 +199,91 @@ int send_notification(int socket, Row* currentRow, int seqn) {
 	return seqn;
 }
 
+void receive_FOLLOW(packet received_packet, int socket, std::string currentUser){
+	std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
+	char payload[PAYLOAD_SIZE];
+
+	int status = masterTable->followUser(newFollowedUsername, currentUser);
+	switch(status){
+		case 0:
+			send_ack_to_client(socket, received_packet.seqn);
+			std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+			break;
+		case -1:
+			// user does not exist
+			snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
+			send_error_to_client(socket, received_packet.seqn, payload);
+			printf("ERROR: user does not exist.\n"); fflush(stdout);
+			break;
+		case -2:
+			snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
+			send_error_to_client(socket, received_packet.seqn, payload);
+			printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
+			break;
+		case -3:
+			snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
+			send_error_to_client(socket, received_packet.seqn, payload);
+			std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+			break;
+	}
+}
+
+
+std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thread_id){
+	char payload[PAYLOAD_SIZE];
+	Row* currentRow;
+	std::string currentUser(received_packet._payload); //copying char array into proper std::string type
+
+	// check if map already has the username in there before inserting
+	masterTable->addUserIfNotExists(currentUser);
+	std::cout << "User " + currentUser + " is connecting...";
+
+	currentRow = masterTable->getRow(currentUser);
+	
+	if(currentRow->connectUser())
+	{
+		send_ack_to_client(socketfd, received_packet.seqn);
+		std::cout << " connected." << std::endl;
+	} else{
+		snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
+		send_error_to_client(socketfd, received_packet.seqn, payload);
+		printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
+		closeConnection(socketfd, (int)thread_id);
+	}
+	return currentUser;
+}
+
+int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
+	Row* currentRow;
+	if(received_packet.seqn == seqn){
+		currentRow = masterTable->getRow(currentUser);
+		int activeSessions = currentRow->getActiveSessions();
+		if(activeSessions == 1) {
+			currentRow->popNotification();
+		} else { // 2 active sessions
+			// TODO consertar problema de mutex
+			bool was_notification_delivered = currentRow->get_notification_delivered();
+			if(was_notification_delivered) {
+				// one notification was delivered for now
+				currentRow->popNotification();
+			} else {
+				// no notification was delivered yet
+				currentRow->set_notification_delivered(true);
+				bool timeout_condition = false;
+				std::time_t start_timestamp = std::time(nullptr);
+				// wait until the other thread sends notification
+				while(currentRow->get_notification_delivered() == true && !timeout_condition){
+					std::time_t loop_timestamp = std::time(nullptr);
+					timeout_condition = !(loop_timestamp - start_timestamp <= 3);
+				}
+			}
+		}
+		return 0;
+	} else {
+		return -1;
+	}
+}
+
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
 	bool waiting_for_ack = false;
@@ -249,55 +334,38 @@ void * socket_thread(void *arg) {
 						case TYPE_CONNECT:
 						{
 							max_reference_seqn = received_packet.seqn;
-							std::string username(received_packet._payload); //copying char array into proper std::string type
-							currentUser = username;
-
-							// check if map already has the username in there before inserting
-							masterTable->addUserIfNotExists(username);
-							std::cout << "User " + currentUser + " is connecting...";
-
-							currentRow = masterTable->getRow(username);
-							
-							if(currentRow->connectUser())
-							{
-								send_ack_to_client(socket, received_packet.seqn);
-								std::cout << " connected." << std::endl;
-							} else{
-								snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
-								send_error_to_client(socket, received_packet.seqn, payload);
-								printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
-								closeConnection(socket, (int)thread_id);
-							}
+							currentUser = receive_CONNECT(received_packet, socket, thread_id);
 							break;
 						}
 						case TYPE_FOLLOW:
 						{
 							max_reference_seqn = received_packet.seqn;
-							std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
+							receive_FOLLOW(received_packet, socket, currentUser);
+							// std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
 							
-							int status = masterTable->followUser(newFollowedUsername, currentUser);
-							switch(status){
-								case 0:
-									send_ack_to_client(socket, received_packet.seqn);
-									std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-									break;
-								case -1:
-									// user does not exist
-									snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
-									send_error_to_client(socket, received_packet.seqn, payload);
-									printf("ERROR: user does not exist.\n"); fflush(stdout);
-									break;
-								case -2:
-									snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
-									send_error_to_client(socket, received_packet.seqn, payload);
-									printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
-									break;
-								case -3:
-									snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
-									send_error_to_client(socket, received_packet.seqn, payload);
-									std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-									break;
-							}
+							// int status = masterTable->followUser(newFollowedUsername, currentUser);
+							// switch(status){
+							// 	case 0:
+							// 		send_ack_to_client(socket, received_packet.seqn);
+							// 		std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+							// 		break;
+							// 	case -1:
+							// 		// user does not exist
+							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
+							// 		send_error_to_client(socket, received_packet.seqn, payload);
+							// 		printf("ERROR: user does not exist.\n"); fflush(stdout);
+							// 		break;
+							// 	case -2:
+							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
+							// 		send_error_to_client(socket, received_packet.seqn, payload);
+							// 		printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
+							// 		break;
+							// 	case -3:
+							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
+							// 		send_error_to_client(socket, received_packet.seqn, payload);
+							// 		std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
+							// 		break;
+							// }
 							break;
 						}
 						case TYPE_SEND:
@@ -324,33 +392,10 @@ void * socket_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
-							if(received_packet.seqn == seqn){
-								currentRow = masterTable->getRow(currentUser);
-								int activeSessions = currentRow->getActiveSessions();
-								if(activeSessions == 1) {
-									currentRow->popNotification();
-									seqn++;
-								} else { // 2 active sessions
-									// TODO consertar problema de mutex
-									bool was_notification_delivered = currentRow->get_notification_delivered();
-									if(was_notification_delivered) {
-										// one notification was delivered for now
-										currentRow->popNotification();
-										seqn++;
-									} else {
-										// no notification was delivered yet
-										seqn++;
-										currentRow->set_notification_delivered(true);
-										bool timeout_condition = false;
-										std::time_t start_timestamp = std::time(nullptr);
-										// wait until the other thread sends notification
-										while(currentRow->get_notification_delivered() == true && !timeout_condition){
-											std::time_t loop_timestamp = std::time(nullptr);
-											timeout_condition = !(loop_timestamp - start_timestamp <= 3);
-										}
-									}
-								}
+							status = receive_ACK(received_packet, currentUser, seqn);
+							if(status == 0){
 								send_tries = 0; // reset this counter
+								seqn++;
 							}
 							break;
 						}
@@ -439,6 +484,8 @@ int main(int argc, char *argv[])
 	printf("Now listening for incoming connections... \n\n");
 
 	clilen = sizeof(struct sockaddr_in);
+
+	// TODO : criar uma thread e connexao (socket) para cada backup
 
 	// loop that accepts new connections and allocates threads to deal with them
 	while(1) {

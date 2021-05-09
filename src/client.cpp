@@ -177,7 +177,6 @@ int send_message(int socketfd, char* buffer) {
     status = read_message(socketfd, server_message);
     if(status == 0){
       packet_received = buffer_to_packet(server_message);
-      print_packet(packet_received);
       if(packet_received.type == TYPE_ACK)
       {
         return 0;
