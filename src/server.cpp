@@ -182,7 +182,7 @@ void send_error_to_client(int socket, int reference_seqn, char* error_message)
 	write_message(socket, buffer);
 }
 
-int send_notification(int socket, Row* currentRow, int seqn) {
+void send_notification(int socket, Row* currentRow, int seqn) {
 	packet packet_to_send;
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
@@ -195,8 +195,6 @@ int send_notification(int socket, Row* currentRow, int seqn) {
 	packet_to_send = create_packet(payload, TYPE_MSG, seqn);
 	serialize_packet(packet_to_send, buffer);
 	write_message(socket, buffer);
-
-	return seqn;
 }
 
 void receive_FOLLOW(packet received_packet, int socket, std::string currentUser){
@@ -253,6 +251,17 @@ std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thre
 	return currentUser;
 }
 
+void receive_DISCONNECT(std::string currentUser, int socket, pthread_t thread_id){
+	Row* currentRow = masterTable->getRow(currentUser);
+	currentRow->closeSession();
+	std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
+	if (shutdown(socket, SHUT_RDWR) !=0 ) {
+		std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
+	}
+	close(socket);
+	pthread_exit(NULL);
+}
+
 int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	Row* currentRow;
 	if(received_packet.seqn == seqn){
@@ -282,6 +291,48 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	} else {
 		return -1;
 	}
+}
+
+int send_message_to_client(std::string currentUser, int seqn, int socket){
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	std::string notification;
+	packet packet_to_send;
+	if(currentUser != "not-connected") // if the user has already connected
+	{
+		Row* currentRow = masterTable->getRow(currentUser);
+		
+		if(currentRow->hasNewNotification())
+		{
+			int activeSessions = currentRow->getActiveSessions();
+			if(activeSessions == 1) {
+				// consume notification and remove it from the FIFO
+				send_notification(socket, currentRow, seqn);
+				// send_tries++;
+				return 0;
+			} else if(activeSessions == 2) {
+				// TODO consertar aqui !!! botar um lock
+				bool was_notification_delivered = currentRow->get_notification_delivered();
+				if(was_notification_delivered) {
+					// consume notification and remove it from the FIFO
+					send_notification(socket, currentRow, seqn);
+					// send_tries ++;
+					return 0;
+					// currentRow->set_notification_delivered(false);
+				} else {
+					// consume notification but DO NOT remove it from the FIFO
+					notification = currentRow->getNotification();
+					strcpy(payload, notification.c_str());
+					packet_to_send = create_packet(payload, 0, seqn);
+					serialize_packet(packet_to_send, buffer);
+					write_message(socket, buffer);
+					// send_tries++;
+					return 0;
+				}
+			}
+		}
+	}
+	return -1;
 }
 
 // Thread designated for the connected client
@@ -354,15 +405,7 @@ void * socket_thread(void *arg) {
 						case TYPE_DISCONNECT:
 						{
 							max_reference_seqn = received_packet.seqn;
-							// TODO mandar mensagem pro usuario quando ele se desconectar
-							currentRow = masterTable->getRow(currentUser);
-							currentRow->closeSession();
-							std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
-							if (shutdown(socket, SHUT_RDWR) !=0 ) {
-								std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
-							}
-							close(socket);
-							pthread_exit(NULL);
+							receive_DISCONNECT(currentUser, socket, thread_id);
 							break;
 						}
 						case TYPE_ACK:
@@ -382,38 +425,9 @@ void * socket_thread(void *arg) {
 		sleep(1);
 
 		// send message, if there is any
-		if(currentUser != "not-connected") // if the user has already connected
-		{
-			currentRow = masterTable->getRow(currentUser);
-			
-			if(currentRow->hasNewNotification())
-			{
-				int activeSessions = currentRow->getActiveSessions();
-				if(activeSessions == 1) {
-					// consume notification and remove it from the FIFO
-					seqn = send_notification(socket, currentRow, seqn);
-					send_tries++;
-				} else if(activeSessions == 2) {
-					// TODO consertar aqui !!! botar um lock
-					bool was_notification_delivered = currentRow->get_notification_delivered();
-					if(was_notification_delivered) {
-						// consume notification and remove it from the FIFO
-						seqn = send_notification(socket, currentRow, seqn);
-						send_tries ++;
-						// currentRow->set_notification_delivered(false);
-					} else {
-						// TODO ver se o server nao pode mandar sem querer 2x a notificacao
-							// pra mesma sessao
-						// consume notification but DO NOT remove it from the FIFO
-						notification = currentRow->getNotification();
-						strcpy(payload, notification.c_str());
-						packet_to_send = create_packet(payload, 0, seqn);
-						serialize_packet(packet_to_send, buffer);
-						write_message(socket, buffer);
-						send_tries++;
-					}
-				}
-			}
+		status = send_message_to_client(currentUser, seqn, socket);
+		if(status == 0){
+			send_tries++;
 		}
   	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
 
