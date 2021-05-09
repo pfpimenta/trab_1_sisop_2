@@ -341,31 +341,6 @@ void * socket_thread(void *arg) {
 						{
 							max_reference_seqn = received_packet.seqn;
 							receive_FOLLOW(received_packet, socket, currentUser);
-							// std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
-							
-							// int status = masterTable->followUser(newFollowedUsername, currentUser);
-							// switch(status){
-							// 	case 0:
-							// 		send_ack_to_client(socket, received_packet.seqn);
-							// 		std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-							// 		break;
-							// 	case -1:
-							// 		// user does not exist
-							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: user does not exist \n");
-							// 		send_error_to_client(socket, received_packet.seqn, payload);
-							// 		printf("ERROR: user does not exist.\n"); fflush(stdout);
-							// 		break;
-							// 	case -2:
-							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: a user cannot follow himself \n");
-							// 		send_error_to_client(socket, received_packet.seqn, payload);
-							// 		printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
-							// 		break;
-							// 	case -3:
-							// 		snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
-							// 		send_error_to_client(socket, received_packet.seqn, payload);
-							// 		std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
-							// 		break;
-							// }
 							break;
 						}
 						case TYPE_SEND:
