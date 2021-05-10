@@ -7,6 +7,12 @@
 #include <chrono>
 #include <iostream>
 
+
+#ifndef SESSION_H
+#define SESSION_H
+#include "../include/session.hpp"
+#endif
+
 class Row {
 	// a row corresponds to a user
 
@@ -18,6 +24,7 @@ class Row {
 		int reader_counter;
 		pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 		pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
+		std::list<session_struct> sessions;
 
 	public:
 		Row();

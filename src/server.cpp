@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <ctime>
 #include <fcntl.h>
 #include <fstream>
@@ -35,13 +36,6 @@ pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define PAYLOAD_SIZE 128
 #define MAX_TRIES 3 // maximum number of tries to send a notification to a client
 
-#define TYPE_CONNECT 0
-#define TYPE_FOLLOW 1
-#define TYPE_SEND 2
-#define TYPE_MSG 3
-#define TYPE_ACK 4
-#define TYPE_ERROR 5
-#define TYPE_DISCONNECT 6
 
 typedef struct __communication_params{
   char* type; // BACKUP ou PRIMARY
@@ -211,7 +205,6 @@ void send_notification(int socket, Row* currentRow, int seqn) {
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
 	std::string notification;
-	int status;
 
 	// send notification
 	notification = currentRow->getNotification();
@@ -243,7 +236,7 @@ void receive_FOLLOW(packet received_packet, int socket, std::string currentUser)
 			printf("ERROR: user cannot follow himself.\n"); fflush(stdout);
 			break;
 		case -3:
-			snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser, newFollowedUsername);
+			snprintf(payload, PAYLOAD_SIZE, "ERROR: %s is already following %s\n", currentUser.c_str(), newFollowedUsername.c_str());
 			send_error_to_client(socket, received_packet.seqn, payload);
 			std::cout << currentUser + " is already following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 			break;
@@ -317,6 +310,18 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	}
 }
 
+int send_update_to_backup(int current_server_id, int seqn, int socket){
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	packet packet_to_send;
+	if(current_server_id != -1) // if the backup has already connected
+	{
+		// TODO
+	}
+	return 0;
+}
+
+
 int send_message_to_client(std::string currentUser, int seqn, int socket){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
@@ -332,7 +337,6 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 			if(activeSessions == 1) {
 				// consume notification and remove it from the FIFO
 				send_notification(socket, currentRow, seqn);
-				// send_tries++;
 				return 0;
 			} else if(activeSessions == 2) {
 				// TODO consertar aqui !!! botar um lock
@@ -340,9 +344,7 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 				if(was_notification_delivered) {
 					// consume notification and remove it from the FIFO
 					send_notification(socket, currentRow, seqn);
-					// send_tries ++;
 					return 0;
-					// currentRow->set_notification_delivered(false);
 				} else {
 					// consume notification but DO NOT remove it from the FIFO
 					notification = currentRow->getNotification();
@@ -350,7 +352,6 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 					packet_to_send = create_packet(payload, 0, seqn);
 					serialize_packet(packet_to_send, buffer);
 					write_message(socket, buffer);
-					// send_tries++;
 					return 0;
 				}
 			}
@@ -361,21 +362,15 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 
 // Thread designated for the connected backup server
 void * servers_socket_thread(void *arg) {
-	bool waiting_for_ack = false;
 	int socket = *((int *)arg);
 	int send_tries = 0;
 	int size = 0;
 	int seqn = 0;
 	int status;
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
-	char payload[PAYLOAD_SIZE];
-	char client_message[BUFFER_SIZE];
 	char buffer[BUFFER_SIZE];
-	Row* currentRow;
-	int currentServerId = -1;
-	std::string notification;
-	
-	packet packet_to_send;
+	char backup_server_message[BUFFER_SIZE];		
+	int current_server_id = -1;
 	packet received_packet;
 
 	// print pthread id
@@ -384,20 +379,17 @@ void * servers_socket_thread(void *arg) {
 	// setting socket to NON-BLOCKING mode
 	set_socket__to_non_blocking_mode(socket);
 
-	// zero-fill the buffer
-	memset(client_message, 0, sizeof client_message);
-
 	// Attribute a new unique incremented ID to the server
 
 	do {
 		// receive message
-		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
+		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			client_message[size] = '\0';
+			backup_server_message[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
 			char* token_end_of_packet;
-  			char* rest_packet = client_message;
+  			char* rest_packet = backup_server_message;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
@@ -416,15 +408,14 @@ void * servers_socket_thread(void *arg) {
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-		// send message, if there is any
-		status = send_message_to_client(currentServerId, seqn, socket);
+		// send update, if there is any
+		status = send_update_to_backup(current_server_id, seqn, socket);
 		if(status == 0){
 			send_tries++;
 		}
   	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
-	currentRow->closeSession();
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to shutdown a connection socket." << std::endl;
 	}
@@ -434,21 +425,18 @@ void * servers_socket_thread(void *arg) {
 
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
-	bool waiting_for_ack = false;
 	int socket = *((int *)arg);
 	int send_tries = 0;
 	int size = 0;
 	int seqn = 0;
 	int status;
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
-	char payload[PAYLOAD_SIZE];
 	char client_message[BUFFER_SIZE];
 	char buffer[BUFFER_SIZE];
 	Row* currentRow;
 	std::string currentUser = "not-connected";
 	std::string notification;
 	
-	packet packet_to_send;
 	packet received_packet;
 
 	// print pthread id
@@ -529,6 +517,7 @@ void * socket_thread(void *arg) {
   	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
+	currentRow = masterTable->getRow(currentUser);
 	currentRow->closeSession();
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to shutdown a connection socket." << std::endl;

@@ -11,6 +11,9 @@ Row::Row(){
 void Row::startSession(){
 	pthread_mutex_lock(&(this->read_write_mutex));
 	this->active_sessions += 1;
+	// TODO
+	// new_session
+	// this->sessions.push_back(new_session);
 	pthread_mutex_unlock(&(this->read_write_mutex));
 }
 

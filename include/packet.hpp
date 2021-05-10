@@ -14,6 +14,10 @@
 #define TYPE_ACK 4
 #define TYPE_ERROR 5
 #define TYPE_DISCONNECT 6
+#define TYPE_SET_ID 7
+#define TYPE_UPDATE_ROW 8
+#define TYPE_HEARTBEAT 9
+#define TYPE_BACKUP 10
 
 
 typedef struct __packet{
@@ -25,6 +29,9 @@ typedef struct __packet{
         // 4 - ACK (seqn)
         // 5 - ERROR (seqn, error_message)
         // 6 - DISCONNECT (seqn)
+        // 7 - SET_ID (id, seqn)
+        // 8 - UPDATE_ROW (Row, seqn)
+        // 9 - HEARTBEAT (seqn)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem

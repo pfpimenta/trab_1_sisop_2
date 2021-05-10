@@ -21,14 +21,6 @@ pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define BUFFER_SIZE 256
 #define PAYLOAD_SIZE 128
 
-#define TYPE_CONNECT 0
-#define TYPE_FOLLOW 1
-#define TYPE_SEND 2
-#define TYPE_MSG 3
-#define TYPE_ACK 4
-#define TYPE_ERROR 5
-#define TYPE_DISCONNECT 6
-
 int seqn = 0;
 
 // Global termination flag, set by the signal handler.
