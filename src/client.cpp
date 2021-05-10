@@ -251,6 +251,8 @@ void communication_loop(int socketfd)
         send_ack(socketfd, packet.seqn);
       }
 
+      sleep(1);
+
       // send packet to server, if there is any
       pthread_mutex_lock(&packets_to_send_mutex);
       if(!packets_to_send_fifo.empty())
@@ -408,6 +410,7 @@ void * interface_thread(void *arg) {
     }
     pthread_mutex_unlock(&packets_received_mutex);
 
+    sleep(1);
   }
 
 	printf("Exiting threads %d\n", (int)thread_id);

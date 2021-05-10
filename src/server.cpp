@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <thread>
 #include <list>
 #include <map>
 #include <netinet/in.h>
@@ -42,9 +43,32 @@ pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define TYPE_ERROR 5
 #define TYPE_DISCONNECT 6
 
+typedef struct __communication_params{
+  char* type; // BACKUP ou PRIMARY
+  int local_clients_listen_port;
+  int local_servers_listen_port;
+  char* remote_primary_server_ip_address;
+  int remote_primary_server_port;
+} communication_params;
+
+typedef struct __server {
+  int id;
+  char* ip;
+  int port;
+} server_struct;
+
+// TODO mutexes, transformar em classe!
+std::map< int*, server_struct* > servers_table;
+
+// TODO mutexes, jogar na classe!
+int gid = 0;
+int myServerID = -1;
 
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
+
+// Global primary flag
+bool is_primary = true;	
 
 bool get_termination_signal(){
   pthread_mutex_lock(&termination_signal_mutex);
@@ -92,7 +116,7 @@ void write_message(int newsockfd, char* message)
 }
 
 // opens a socket, binds it, and starts listening for incoming connections
-int setup_socket()
+int setup_socket(int port)
 {
 	int sockfd;
     struct sockaddr_in serv_addr;
@@ -109,7 +133,7 @@ int setup_socket()
 	}
 
 	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(PORT);
+	serv_addr.sin_port = htons(port);
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(serv_addr.sin_zero), 8);
     
@@ -335,6 +359,79 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 	return -1;
 }
 
+// Thread designated for the connected backup server
+void * servers_socket_thread(void *arg) {
+	bool waiting_for_ack = false;
+	int socket = *((int *)arg);
+	int send_tries = 0;
+	int size = 0;
+	int seqn = 0;
+	int status;
+	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
+	char payload[PAYLOAD_SIZE];
+	char client_message[BUFFER_SIZE];
+	char buffer[BUFFER_SIZE];
+	Row* currentRow;
+	int currentServerId = -1;
+	std::string notification;
+	
+	packet packet_to_send;
+	packet received_packet;
+
+	// print pthread id
+	pthread_t thread_id = pthread_self();
+
+	// setting socket to NON-BLOCKING mode
+	set_socket__to_non_blocking_mode(socket);
+
+	// zero-fill the buffer
+	memset(client_message, 0, sizeof client_message);
+
+	// Attribute a new unique incremented ID to the server
+
+	do {
+		// receive message
+		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			client_message[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+  			char* rest_packet = client_message;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+
+				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
+					// already received this message
+					send_ack_to_client(socket, received_packet.seqn);
+				} else if (received_packet.type == TYPE_ACK) {
+					// TODO
+				} else {
+					std::cout << "Invalid message type from backup server" << std::endl;
+				}
+			}
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+		// send message, if there is any
+		status = send_message_to_client(currentServerId, seqn, socket);
+		if(status == 0){
+			send_tries++;
+		}
+  	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
+
+	printf("Exiting socket thread: %d\n", (int)thread_id);
+	currentRow->closeSession();
+	if (shutdown(socket, SHUT_RDWR) !=0 ) {
+		std::cout << "Failed to shutdown a connection socket." << std::endl;
+	}
+	close(socket);
+	pthread_exit(NULL);
+}
+
 // Thread designated for the connected client
 void * socket_thread(void *arg) {
 	bool waiting_for_ack = false;
@@ -417,9 +514,9 @@ void * socket_thread(void *arg) {
 							}
 							break;
 						}
-						}
 					}
 				}
+			}
 		}
 
 		sleep(1);
@@ -448,7 +545,8 @@ void exit_hook_handler(int signal) {
 
 int main(int argc, char *argv[])
 {
-	int sockfd;
+	int clients_sockfd;
+	int servers_sockfd;
 	int newsockfd;
 	int* newsockptr;
 	socklen_t clilen;
@@ -456,6 +554,33 @@ int main(int argc, char *argv[])
 	std::list<pthread_t> threads_list;
 	pthread_t newthread;
 	std::list<int*> socketptrs_list;
+	communication_params communication_parameters;
+
+	// Read arguments
+	if (argc == 4 || argc == 6) {
+
+		communication_parameters.type = argv[1]; // Server type: primary or backup?
+
+    	communication_parameters.local_clients_listen_port = atoi(argv[2]);
+    	communication_parameters.local_servers_listen_port = atoi(argv[3]);
+
+		if ((strcmp(communication_parameters.type, "backup") == 0) && (argc == 6)) {
+			// Optional args
+			communication_parameters.remote_primary_server_ip_address = argv[4];
+    		communication_parameters.remote_primary_server_port = atoi(argv[5]);
+
+			is_primary = false;
+
+		} else if ((strcmp(communication_parameters.type, "backup") == 0) && (argc != 6)) {
+			std::cout << "Remote primary server IP and port were not informed." << std::endl;
+			std::cout << "Usage: <type: 'backup' or 'primary'> <listen port for clients> <listen port for servers> <remote primary IP> <remote primary port>" << std::endl;
+			exit(1);
+		}
+	}
+	else {
+		std::cout << "Usage: <type: 'backup' or 'primary'> <listen port for clients> <listen port for servers> <remote primary IP> <remote primary port>" << std::endl;
+		exit(0);
+	}
 
 	// Install handler (assign handler to signal)
     std::signal(SIGINT, exit_hook_handler);
@@ -468,8 +593,10 @@ int main(int argc, char *argv[])
 	// load backup table if it exists
 	masterTable->load_backup_table();
 
-	// setup LISTEN socket
-    sockfd = setup_socket();
+	// setup LISTEN sockets
+    clients_sockfd = setup_socket(communication_parameters.local_clients_listen_port);
+	servers_sockfd = setup_socket(communication_parameters.local_servers_listen_port);
+
 	printf("Now listening for incoming connections... \n\n");
 
 	clilen = sizeof(struct sockaddr_in);
@@ -479,17 +606,17 @@ int main(int argc, char *argv[])
 	// loop that accepts new connections and allocates threads to deal with them
 	while(1) {
 		
-		// If new incoming connection, accept. Then continue as normal.
-		if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
+		// If new incoming CLIENTS connection, accept. Then continue as normal.
+		if ((newsockfd = accept(clients_sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
 			
 			if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
-				std::cout << "Failed to allocate enough memory for the newsockptr." << std::endl;
+				std::cout << "Failed to allocate enough memory for the newsockptr. (clients)" << std::endl;
 				exit(-1);
 			}	
 			
 			*newsockptr = newsockfd;
 			if (pthread_create(&newthread, NULL, socket_thread, newsockptr) != 0 ) {
-				printf("Failed to create thread\n");
+				printf("Failed to create clients socket thread\n");
 				exit(-1);
 			} else {
 				threads_list.push_back(newthread);
@@ -497,15 +624,46 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		// If new incoming SERVERS connection, accept. Then continue as normal.
+		if ((newsockfd = accept(servers_sockfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
+			
+			if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
+				std::cout << "Failed to allocate enough memory for the newsockptr. (servers)" << std::endl;
+				exit(-1);
+			}	
+			
+			*newsockptr = newsockfd;
+			if (pthread_create(&newthread, NULL, servers_socket_thread, newsockptr) != 0 ) {
+				printf("Failed to create servers socket thread\n");
+				exit(-1);
+			} else {
+				threads_list.push_back(newthread);
+				socketptrs_list.push_back(newsockptr);
+			}
+		}
+
+		// If server is of type BACKUP, then open connection to the primary and spawn a thread
+		if (is_primary == false) {
+			//TODO
+			// conectar ao primary, iniciar thread que trata, etc
+			std::cout << "is backup" << std::endl;
+			exit(1);
+		}
+
 		// Cleanup code for main server thread
 		if(get_termination_signal() == true) {
 			std::cout << "Server is now gracefully shutting down..." << std::endl;
 			// TODO informar aos clientes q o servidor esta desligando
 			std::cout << "Closing passive socket..." << std::endl;
-			if (shutdown(sockfd, SHUT_RDWR) !=0 ) {
-				std::cout << "Failed to shutdown a connection socket." << std::endl;
+			if (shutdown(clients_sockfd, SHUT_RDWR) !=0 ) {
+				std::cout << "Failed to shutdown the clients connection socket." << std::endl;
 			}
-			close(sockfd);
+			close(clients_sockfd);
+			if (shutdown(servers_sockfd, SHUT_RDWR) !=0 ) {
+				std::cout << "Failed to shutdown the servers connection socket." << std::endl;
+			}
+			close(servers_sockfd);
+			
 			for (auto const& thread_id : threads_list) {
 				pthread_join(thread_id, NULL);
 			}
@@ -522,5 +680,7 @@ int main(int argc, char *argv[])
 			std::cout << "Shutdown routine successfully completed." << std::endl;
 			exit(0);
 		}
+
+		sleep(1);
 	}
 }

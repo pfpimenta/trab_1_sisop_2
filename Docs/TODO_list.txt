@@ -40,3 +40,16 @@
    que as filas de mensagem de cada um demorem mais do que
    os segundo de sleep para serem lidas
 	-> perda de mensagens
+
+
+
+
+// bugfixes
+-> client dá segfault quando tenta iniciar uma terceira sessão do mesmo username
+
+-> client, quando tenta dar follow em um user que já tá seguindo, mensagem de erro com lixo nos nomes de usuários (string gerada pelo server errada? garbled text)
+
+-> mensagem no cliente "ERROR reading from socket" não deveria aparecer
+
+-> server dá segfault quando recebe ctrl+c
+	-> deveria também enviar um disconnect/shutdown pra avisar os usuários que está desligando?
