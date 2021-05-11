@@ -6,7 +6,6 @@
 -> servidor primário avisar cada cliente que agora é o primário
 
 -> cliente abrir porta para ouvir mensagens de vitória
-
 -> cliente fechar conexão antiga e abrir conexão nova
 
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
@@ -26,7 +25,6 @@
 
 -> nova porta listen do cliente:
 	-> para receber aviso de troca de server primario
-	-> para receber heartbeat
 	-> cliente deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
 
 -> heartbeat

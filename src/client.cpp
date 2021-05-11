@@ -1,6 +1,8 @@
+#include <chrono>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <thread>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -36,6 +38,11 @@ pthread_mutex_t packets_received_mutex = PTHREAD_MUTEX_INITIALIZER;
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
 
+// Global server change flag
+bool server_change_signal = false;
+
+pthread_t communication_tid;
+
 bool get_termination_signal(){
   pthread_mutex_lock(&termination_signal_mutex);
   bool signal = termination_signal;
@@ -57,6 +64,9 @@ typedef struct __communication_params{
   int port;
   int local_listen_port;
 } communication_params;
+
+communication_params communication_parameters;
+
 
 std::list<packet> packets_to_send_fifo;
 std::list<packet> packets_received_fifo;
@@ -224,6 +234,16 @@ void print_commands()
   fflush(stdout);
 }
 
+void terminate_thread_and_socket(int socketfd) {
+  pthread_t thread_id = pthread_self();
+  printf("Exiting socket thread: %d\n", (int)thread_id);
+  if (shutdown(socketfd, SHUT_RDWR) !=0 ) {
+    std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
+  }
+  close(socketfd);
+  pthread_exit(NULL);
+}
+
 void communication_loop(int socketfd)
 {
     char buffer[BUFFER_SIZE];
@@ -273,10 +293,26 @@ void communication_loop(int socketfd)
           sleep(1);
         }
       }
+
+      // detect server change
+      if(server_change_signal == true) 
+      {
+        server_change_signal = false;
+        
+        // create new thread
+        communication_parameters.port = new_port;
+        communication_parameters.server_ip_address = new_server_ip;
+        // TODO aqui pode ter erro por reutilizar a communication_tid
+        pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters);
+        pthread_mutex_unlock(&packets_to_send_mutex);
+
+        terminate_thread_and_socket(socketfd);
+      }
+
       pthread_mutex_unlock(&packets_to_send_mutex);
     }
 
-    printf("\nClosing server connection...\nTerminating client....\n");
+    printf("\nClosing current server connection...\n");
     // Send a DISCONNECT packet
     snprintf(payload, PAYLOAD_SIZE, " ");
     packet = create_packet(payload, 6, seqn);
@@ -308,12 +344,80 @@ void * communication_thread(void *arg) {
 
   communication_loop(socketfd);
 
-	printf("Exiting socket thread: %d\n", (int)thread_id);
-  if (shutdown(socketfd, SHUT_RDWR) !=0 ) {
-    std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
+  terminate_thread_and_socket(socketfd);
+}
+
+
+// function for the thread that receives a server change message
+// from the new primary server
+void* server_change_thread(void *arg) {
+  // TODO
+  while (get_termination_signal() == false)
+  {
+		// receive message
+		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			backup_server_message[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+  			char* rest_packet = backup_server_message;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+
+				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
+					// already received this message
+					send_ACK(socket, received_packet.seqn);
+				} else if(received_packet.type == TYPE_SERVER_CHANGE) {
+          // TODO parse ip, parse port
+          // TODO salvar ip e porta  em communication_parameters (global)
+          // TODO ativar server_change_signal
+          // TODO matar essa thread
+				}
+			}
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-	close(socketfd);
-	pthread_exit(NULL);
+}
+
+// function for the thread that keeps listening for
+// substitutions of the primary server
+void * listen_thread(void *arg) {
+  communication_params params = *((communication_params *)arg);
+  int newsockfd;
+  int* newsockptr;
+	socklen_t clilen;
+	struct sockaddr_in cli_addr;
+	pthread_t newthread;
+
+	// setup LISTEN socket
+  int listen_socketfd = setup_socket(params);
+
+  while(get_termination_signal() == false){
+		// If there is a new incoming connection, accept. Then continue as normal.
+		if ((newsockfd = accept(listen_socketfd, (struct sockaddr *) &cli_addr, &clilen)) != -1) {
+			
+			if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
+				std::cout << "Failed to allocate enough memory for the newsockptr. (listen socket)" << std::endl;
+				exit(-1);
+			}
+
+			*newsockptr = newsockfd;
+			if (pthread_create(&newthread, NULL, server_change_thread, newsockptr) != 0 ) {
+				printf("Failed to create clients socket thread\n");
+				exit(-1);
+			} else {
+        // TODO
+				// threads_list.push_back(newthread);
+				// socketptrs_list.push_back(newsockptr);
+			}
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
 }
 
 
@@ -425,8 +529,7 @@ void exit_hook_handler(int signal) {
 
 int main(int argc, char*argv[])
 {
-  communication_params communication_parameters;
-  pthread_t communication_tid, interface_tid;
+  pthread_t interface_tid, listen_tid;
 
   // Install handler (assign handler to signal)
   std::signal(SIGINT, exit_hook_handler);
@@ -444,8 +547,13 @@ int main(int argc, char*argv[])
     communication_parameters.local_listen_port = atoi(argv[4]);
   }
   
-  // create thread for receiving server packets
+  // create thread for receiving and sending packets to server
   if (pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters) != 0 ) {
+    printf("Failed to create thread\n");
+    exit(-1);
+  }
+  // create listening thread for recognizing new primary servers (server change)
+  if (pthread_create(&listen_tid, NULL, listen_thread, &communication_parameters) != 0 ) {
     printf("Failed to create thread\n");
     exit(-1);
   }
