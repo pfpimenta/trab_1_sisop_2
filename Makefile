@@ -6,7 +6,7 @@ all: server client
 client: packet.o client.o 
 	g++ $(CFLAGS) -o client client.o packet.o $(LDFLAGS)
 
-client.o: src/client.cpp include/packet.hpp
+client.o: src/client.cpp include/client.hpp
 	g++ $(CFLAGS) -o client.o -c src/client.cpp $(LDFLAGS)
 	
 server: Row.o MasterTable.o packet.o server.o session.o

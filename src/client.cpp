@@ -1,35 +1,4 @@
-#include <chrono>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <thread>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h> 
-#include <pthread.h>
-#include <semaphore.h>
-#include <fcntl.h>
-#include <list>
-#include <csignal>
-#include <iostream>
-#include <poll.h>
-
-#include "../include/packet.hpp"
-
-#define MAX_TRIES 3
-
-#define BUFFER_SIZE 256
-#define PAYLOAD_SIZE 128
-
-#define ANSI_COLOR_RED     "\x1b[31m"
-#define ANSI_COLOR_GREEN   "\x1b[32m"
-#define ANSI_COLOR_YELLOW  "\x1b[33m"
-#define ANSI_COLOR_BLUE    "\x1b[34m"
-#define ANSI_COLOR_MAGENTA "\x1b[35m"
-#define ANSI_COLOR_CYAN    "\x1b[36m"
-#define ANSI_COLOR_RESET   "\x1b[0m"
+#include "../include/client.hpp"
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -43,6 +12,14 @@ bool server_change_signal = false;
 
 pthread_t communication_tid;
 
+int seqn = 0;
+
+communication_params communication_parameters;
+
+std::list<packet> packets_to_send_fifo;
+std::list<packet> packets_received_fifo;
+
+
 bool get_termination_signal(){
   pthread_mutex_lock(&termination_signal_mutex);
   bool signal = termination_signal;
@@ -55,21 +32,6 @@ void set_termination_signal(bool new_signal_value){
   termination_signal = new_signal_value;
   pthread_mutex_unlock(&termination_signal_mutex);
 }
-
-int seqn = 0;
-
-typedef struct __communication_params{
-  char* profile_name;
-  char* server_ip_address;
-  int port;
-  int local_listen_port;
-} communication_params;
-
-communication_params communication_parameters;
-
-
-std::list<packet> packets_to_send_fifo;
-std::list<packet> packets_received_fifo;
 
 // writes a message in a socket (sends a message through it)
 int write_message(int socketfd, char* message)
@@ -112,6 +74,40 @@ void blocking_read_message(int socketfd, char* buffer)
     n = read(socketfd, buffer, BUFFER_SIZE);
   } while(n < 0);
 }
+
+int setup_listen_socket(int port)
+{
+	int sockfd;
+  struct sockaddr_in serv_addr;
+
+	if ((sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1) {
+    printf("ERROR creating LISTEN socket\n");
+    exit(-1);
+	}
+
+	int enable = 1;
+	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+    printf("setsockopt(SO_REUSEADDR) failed\n");
+    exit(-1);
+	}
+
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(port);
+	serv_addr.sin_addr.s_addr = INADDR_ANY;
+	bzero(&(serv_addr.sin_zero), 8);
+  
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0)	{
+		printf("ERROR on binding LISTEN socket... the port is probably already in use\n");
+    exit(-1);
+	}
+	if (listen(sockfd, 50) != 0) {
+		printf("ERROR on activating LISTEN socket\n");
+    exit(-1);
+	}
+
+  return sockfd;
+}
+
 
 int setup_socket(communication_params params)
 {
@@ -207,7 +203,7 @@ int send_message(int socketfd, char* buffer) {
   return -1;
 }
 
-void send_ack(int socketfd, int reference_seqn) {
+void send_ACK(int socketfd, int reference_seqn) {
   packet ack_packet;
   int status;
   char buffer[BUFFER_SIZE];
@@ -269,7 +265,7 @@ void communication_loop(int socketfd)
           max_reference_seqn = packet.seqn;
         }
         // send ACK
-        send_ack(socketfd, packet.seqn);
+        send_ACK(socketfd, packet.seqn);
       }
 
       sleep(1);
@@ -300,8 +296,8 @@ void communication_loop(int socketfd)
         server_change_signal = false;
         
         // create new thread
-        communication_parameters.port = new_port;
-        communication_parameters.server_ip_address = new_server_ip;
+        // communication_parameters.port = new_port;
+        // communication_parameters.server_ip_address = new_server_ip;
         // TODO aqui pode ter erro por reutilizar a communication_tid
         pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters);
         pthread_mutex_unlock(&packets_to_send_mutex);
@@ -351,34 +347,50 @@ void * communication_thread(void *arg) {
 // function for the thread that receives a server change message
 // from the new primary server
 void* server_change_thread(void *arg) {
-  // TODO
+  int socketfd = *((int *)arg);
+  char buffer[BUFFER_SIZE];
+  packet received_packet;
+  int size;
+  int max_reference_seqn_server_change;
+
   while (get_termination_signal() == false)
   {
 		// receive message
-		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			backup_server_message[size] = '\0';
+			buffer[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
 			char* token_end_of_packet;
-  			char* rest_packet = backup_server_message;
+      char* rest_packet = buffer;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 
-				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
+				if(received_packet.seqn <= max_reference_seqn_server_change){
 					// already received this message
-					send_ACK(socket, received_packet.seqn);
+					send_ACK(socketfd, received_packet.seqn);
 				} else if(received_packet.type == TYPE_SERVER_CHANGE) {
-          // TODO parse ip, parse port
-          // TODO salvar ip e porta  em communication_parameters (global)
-          // TODO ativar server_change_signal
-          // TODO matar essa thread
+          // parse ip and port
+          char* token;
+          const char delimiter[2] = ",";
+          char* rest = received_packet._payload;
+          int payload_size = strlen(received_packet._payload);
+          received_packet._payload[payload_size] = '\0';
+          // parse new server ip
+          token = strtok_r(rest, delimiter, &rest);
+          strcpy(communication_parameters.server_ip_address, token);
+          // parse new server port
+          token = strtok_r(rest, delimiter, &rest);
+          communication_parameters.port = atoi(token);
+
+          max_reference_seqn_server_change = received_packet.seqn;
+          server_change_signal = true;
+          terminate_thread_and_socket(socketfd);
 				}
 			}
 		}
-
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
 }
@@ -394,7 +406,9 @@ void * listen_thread(void *arg) {
 	pthread_t newthread;
 
 	// setup LISTEN socket
-  int listen_socketfd = setup_socket(params);
+  printf("DEBUG listening... params.local_listen_port: %d", params.local_listen_port);
+  int listen_socketfd = setup_listen_socket(params.local_listen_port);
+  printf("DEBUG after listen\n");
 
   while(get_termination_signal() == false){
 		// If there is a new incoming connection, accept. Then continue as normal.

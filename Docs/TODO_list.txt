@@ -5,9 +5,6 @@
 
 -> servidor primário avisar cada cliente que agora é o primário
 
--> cliente abrir porta para ouvir mensagens de vitória
--> cliente fechar conexão antiga e abrir conexão nova
-
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
 	-> a cada modificação, essa lista é propagada pros backups
 
