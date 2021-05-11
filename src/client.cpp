@@ -75,6 +75,7 @@ void blocking_read_message(int socketfd, char* buffer)
   } while(n < 0);
 }
 
+// opens a socket, binds it, and starts listening for incoming connections
 int setup_listen_socket(int port)
 {
 	int sockfd;
@@ -108,7 +109,7 @@ int setup_listen_socket(int port)
   return sockfd;
 }
 
-
+// socket that connects to an existing socket
 int setup_socket(communication_params params)
 {
   int socketfd;
@@ -294,11 +295,6 @@ void communication_loop(int socketfd)
       if(server_change_signal == true) 
       {
         server_change_signal = false;
-        
-        // create new thread
-        // communication_parameters.port = new_port;
-        // communication_parameters.server_ip_address = new_server_ip;
-        // TODO aqui pode ter erro por reutilizar a communication_tid
         pthread_create(&communication_tid, NULL, communication_thread, &communication_parameters);
         pthread_mutex_unlock(&packets_to_send_mutex);
 
@@ -406,9 +402,7 @@ void * listen_thread(void *arg) {
 	pthread_t newthread;
 
 	// setup LISTEN socket
-  printf("DEBUG listening... params.local_listen_port: %d", params.local_listen_port);
   int listen_socketfd = setup_listen_socket(params.local_listen_port);
-  printf("DEBUG after listen\n");
 
   while(get_termination_signal() == false){
 		// If there is a new incoming connection, accept. Then continue as normal.
