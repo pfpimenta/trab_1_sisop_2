@@ -65,7 +65,7 @@ typedef struct __client {
 typedef struct __server {
   int server_id;
   char* ip;
-  int port;
+  int port; // porta de listen para outros backups
 } server_struct;
 
 int next_session_id = 0;
@@ -79,8 +79,10 @@ bool termination_signal = false;
 // Global primary flag
 bool is_primary = true;
 
-// 
 int num_backup_servers = 0;
+
+// parameters of this server (passed as arguments in the terminal console)
+server_params server_parameters;
 
 int get_next_session_id(){
 	pthread_mutex_lock(&termination_signal_mutex);
@@ -392,9 +394,13 @@ int receive_SET_ID(int socket){
 		received_packet = buffer_to_packet(buffer);
 		backup_id = atoi(received_packet._payload);
 	}
+
+	send_ACK(socket, received_packet.seqn);
+
 	return backup_id;
 }
 
+// treats ACK received from client
 int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	Row* currentRow;
 	if(received_packet.seqn == seqn){
@@ -426,7 +432,36 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	}
 }
 
-int send_update_to_backup(int current_server_id, int seqn, int socket){
+int receive_CONNECT_SERVER(int socketfd){
+	// TODO : se o primary nao receber nada, essa thread vai ficar rodando em loop aqui
+	char buffer[BUFFER_SIZE];		
+	int size = 0;
+	packet received_packet;
+	int port;
+
+	// receive CONNECT_SERVER message
+	while(size < 1){
+		// try to read until it receives the message
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+	}
+	buffer[size] = '\0';
+
+	// parse socket buffer: get several messages, if there are more than one
+	char* token_end_of_packet;
+	char* rest_packet = buffer;
+	while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+	{
+		strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+		received_packet = buffer_to_packet(buffer);
+		port = atoi(received_packet._payload);
+	}
+
+	send_ACK(socketfd, received_packet.seqn);
+
+	return port;
+}
+
+int send_updates_to_backup(int current_server_id, int seqn, int socket){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
 	packet packet_to_send;
@@ -475,6 +510,47 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 	return -1;
 }
 
+// send CONNECT_SERVER and wait for ACK. returns 0 if success
+int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	int size;
+	int send_tries = 0;
+	packet received_packet, packet_to_send;
+
+	// send CONNECT_SERVER packet to primary server
+	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+	snprintf(payload, PAYLOAD_SIZE, "%d", port);
+	packet_to_send = create_packet(payload, TYPE_CONNECT_SERVER, seqn);
+	serialize_packet(packet_to_send, buffer);
+	write_message(socketfd, buffer);
+
+	// receive ACK from primary
+	do {
+		// receive message
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			buffer[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+			char* rest_packet = buffer;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+				if(received_packet.type == TYPE_ACK){
+					return 0;
+				}
+			}
+		}
+		write_message(socketfd, buffer);
+		send_tries++;
+		sleep(3);
+	} while(send_tries <= MAX_TRIES);
+	return -1;
+}
+
 int send_ping_to_primary(int socketfd, int seqn){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
@@ -484,31 +560,48 @@ int send_ping_to_primary(int socketfd, int seqn){
 	write_message(socketfd, buffer);
 }
 
-int send_set_id(int socketfd, int seqn, int backup_id){
+// send SET_ID and wait for ACK. returns 0 if success
+int send_SET_ID(int socketfd, int seqn, int backup_id){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
-	int status;
+	int status, size;
 	int send_tries = 0;
+	packet received_packet, packet_to_send;
+
+	// send SET_ID packet to backup server
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 	snprintf(payload, PAYLOAD_SIZE, "%d", backup_id);
-	packet packet_to_send = create_packet(payload, TYPE_SET_ID, seqn);
+	packet_to_send = create_packet(payload, TYPE_SET_ID, seqn);
 	serialize_packet(packet_to_send, buffer);
-	status = write_message(socketfd, buffer);
-	while(status != 0 && send_tries < MAX_TRIES){
-		// if send failed, try to send it again
-		status = write_message(socketfd, buffer);
+	write_message(socketfd, buffer);
+
+	// receive ACK from backup
+	do {
+		// receive message
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			buffer[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+			char* rest_packet = buffer;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+				if(received_packet.type == TYPE_ACK){
+					return 0;
+				}
+			}
+		}
+		write_message(socketfd, buffer);
 		send_tries++;
 		sleep(3);
-	}
-
-	if(send_tries >= MAX_TRIES){
-		return -1;
-	} else {
-		return 0;
-	}
+	} while(send_tries <= MAX_TRIES);
+	return -1;
 }
 
-// Thread designated to communicate with the primary server (thread used by backup)
+// Thread designated to communicate with the primary server (thread roda no backup)
 void * primary_communication_thread(void *arg) {
 	int socket = *((int *)arg);
 	int send_tries = 0;
@@ -528,13 +621,24 @@ void * primary_communication_thread(void *arg) {
 	// setting socket to NON-BLOCKING mode
 	set_socket_to_non_blocking_mode(socket);
 
+	// send CONNECT_SERVER
+	status = send_CONNECT_SERVER(socket, seqn, server_parameters.local_servers_listen_port);
+	if(status == 0){
+		seqn++;
+	} else {
+		printf("ERROR: could not connect to primary server.\n"); fflush(stdout);
+		exit(status);
+	}
+
 	// receber SET_ID
 	int backup_id = receive_SET_ID(socket);
-	printf("DEBUG received id: %d", backup_id); fflush(stdout);
+	printf("DEBUG received id: %d\n", backup_id); fflush(stdout);
+
 
 	// inicia timer e manda primeiro ping
 	t0 = std::time(0); // get timestamp
 	send_ping_to_primary(socket, seqn);
+	std::cout << "DEBUG sent HEARTBEAT" << std::endl;
 	seqn++;
 
 	do {
@@ -572,6 +676,7 @@ void * primary_communication_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
+							std::cout << "DEBUG received ACK" << std::endl;
 							send_tries = 0;
 							break;
 						}
@@ -586,6 +691,7 @@ void * primary_communication_thread(void *arg) {
 		t1 = std::time(0); // get timestamp atual
 		if(t1 - t0 > 3) // every 3 seconds
 		{
+			std::cout << "DEBUG sent HEARTBEAT" << std::endl;
 			t0 = t1; // reset timer
 			send_tries++;
 			send_ping_to_primary(socket, seqn);
@@ -609,7 +715,7 @@ void * primary_communication_thread(void *arg) {
 	pthread_exit(NULL);
 }
 
-// Thread designated for the connected backup server
+// Thread designated for the connected backup server (thread roda no primario)
 void * servers_socket_thread(void *arg) {
 	int socket = *((int *)arg);
 	int send_tries = 0;
@@ -629,15 +735,21 @@ void * servers_socket_thread(void *arg) {
 	// setting socket to NON-BLOCKING mode
 	set_socket_to_non_blocking_mode(socket);
 
-	// Attribute a new unique incremented ID to the server
+	// receive CONNECT_SERVER
+	int backup_port = receive_CONNECT_SERVER(socket);
+	printf("DEBUG received backup_port: %d\n", backup_port); fflush(stdout);
+
+
+	// send SET_ID (attribute a new unique incremented ID to the server)
 	num_backup_servers++;
 	backup_id = num_backup_servers;
-	status = send_set_id(socket, seqn, backup_id);
-	if(status == -1){
+	status = send_SET_ID(socket, seqn, backup_id);
+	if(status == 0){
+		seqn++;
+	} else {
 		printf("ERROR: could not send ID to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socket);
 	}
-	seqn++;
 
 	do {
 		// receive message
@@ -660,6 +772,7 @@ void * servers_socket_thread(void *arg) {
 					switch (received_packet.type) {
 						case TYPE_HEARTBEAT:
 						{
+							std::cout << "DEBUG received HEARTBEAT... sending ACK" << std::endl;
 							max_reference_seqn = received_packet.seqn;
 							send_ACK(socket, received_packet.seqn);
 							break;
@@ -667,7 +780,6 @@ void * servers_socket_thread(void *arg) {
 						case TYPE_ACK:
 						{
 							// TODO
-							// receive_backup_ACK(received_packet, socket, thread_id);
 							break;
 						}
 					}
@@ -678,9 +790,11 @@ void * servers_socket_thread(void *arg) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
 		// send update, if there is any
-		status = send_update_to_backup(current_server_id, seqn, socket);
+		status = send_updates_to_backup(current_server_id, seqn, socket);
 		if(status == 0){
 			send_tries++;
+		} else {
+			sleep(1);
 		}
   	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
 
@@ -814,7 +928,6 @@ int main(int argc, char *argv[])
 	std::list<pthread_t> threads_list;
 	pthread_t newthread;
 	std::list<int*> socketptrs_list;
-	server_params server_parameters;
 
 	// Read arguments
 	if (argc == 4 || argc == 6) {

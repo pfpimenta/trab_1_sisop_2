@@ -1,18 +1,7 @@
-
--> inicializar o backup
-
--> trocar de mensagens entre servidores
-
--> servidor primário avisar cada cliente que agora é o primário
-
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
 	-> a cada modificação, essa lista é propagada pros backups
 
--> o primario envia um numero de ID unico para cada backup
-
--> parametros dos RMs backup:
-	-> ip e porta do primario
-	-> quando nao houver parametro, quer dizer que é o primario
+-> na conexao de um novo backup, primario deve mandar todas as informaçoes pro backup
 
 -> replicação das atualizações do RM primario para os backups
 
@@ -24,13 +13,9 @@
 	-> para receber aviso de troca de server primario
 	-> cliente deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
 
--> heartbeat
-	-> cliente pro servidor primario
-	-> servidor primario pros clientes
-	-> servidor primario pros servidores backup
-	-> servidores backup pro servidor primario
-
 -> algoritmo de eleiçao (bully)
+
+-> dps da eleiçao, servidor primário avisar cada cliente que agora é o primário
 
 -> ao eleger um novo servidor primario
 	-> checar se cada sessao continua viva
@@ -53,3 +38,5 @@
 
 -> server dá segfault quando recebe ctrl+c
 	-> deveria também enviar um disconnect/shutdown pra avisar os usuários que está desligando?
+
+-> server primario deve desistir de receber o CONNECT_SERVER alguma hora (nao tentar pra sempre)

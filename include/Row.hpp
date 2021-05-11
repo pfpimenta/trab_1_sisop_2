@@ -48,4 +48,6 @@ class Row {
 		std::string getNotification();
 		void shared_reader_lock();
 		void shared_reader_unlock();
+		// TODO row_to_string()
+		// TODO string_to_row()
 };

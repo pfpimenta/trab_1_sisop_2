@@ -19,22 +19,24 @@
 #define TYPE_UPDATE_BACKUP 9
 #define TYPE_HEARTBEAT 10
 #define TYPE_SERVER_CHANGE 11
+#define TYPE_CONNECT_SERVER 12
 
 
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
-        // 0 - CONNECT (username_to_login, port, seqn)
-        // 1 - FOLLOW (username_to_follow, seqn)
-        // 2 - SEND (message_to_send, seqn)
-        // 3 - MSG (username, message_sent, seqn)
-        // 4 - ACK (seqn)
-        // 5 - ERROR (seqn, error_message)
-        // 6 - DISCONNECT (seqn)
-        // 7 - SET_ID (id, seqn)
-        // 8 - UPDATE_ROW (Row, seqn)
-        // 9 - UPDATE_BACKUP (seqn)
-        // 10 - HEARTBEAT (seqn)
-        // 11 - SERVER_CHANGE (ip, port, seqn)
+        // 0 - CONNECT (username_to_login, port)
+        // 1 - FOLLOW (username_to_follow)
+        // 2 - SEND (message_to_send)
+        // 3 - MSG (username, message_sent)
+        // 4 - ACK
+        // 5 - ERROR (error_message)
+        // 6 - DISCONNECT
+        // 7 - SET_ID (id)
+        // 8 - UPDATE_ROW (Row)
+        // 9 - UPDATE_BACKUP (server_struct)
+        // 10 - HEARTBEAT
+        // 11 - SERVER_CHANGE (ip, port)
+        // 12 - CONNECT_SERVER (port)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem
