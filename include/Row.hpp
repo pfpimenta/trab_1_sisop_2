@@ -6,6 +6,7 @@
 #include <string>
 #include <chrono>
 #include <iostream>
+#include <map>
 
 
 #ifndef SESSION_H
@@ -24,14 +25,15 @@ class Row {
 		int reader_counter;
 		pthread_mutex_t read_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 		pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
-		std::list<session_struct> sessions;
+		std::map< int*, session_struct*> sessions;
+
 
 	public:
 		Row();
-		void startSession();
-		void closeSession();
+		// void startSession(); // TODO delete
+		void closeSession(int session_id);
 		int getActiveSessions();
-		bool connectUser();
+		bool connectUser(session_struct new_session);
 		bool get_notification_delivered();
 		void set_notification_delivered(bool was_notification_delivered);
 		std::list<std::string> getFollowers();
@@ -46,6 +48,4 @@ class Row {
 		std::string getNotification();
 		void shared_reader_lock();
 		void shared_reader_unlock();
-
-
 };

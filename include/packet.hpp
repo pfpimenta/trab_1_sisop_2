@@ -22,7 +22,7 @@
 
 typedef struct __packet{
     uint16_t type; // Tipo do pacote:
-        // 0 - CONNECT (username_to_login, seqn)
+        // 0 - CONNECT (username_to_login, ip, port, seqn)
         // 1 - FOLLOW (username_to_follow, seqn)
         // 2 - SEND (message_to_send, seqn)
         // 3 - MSG (username, message_sent, seqn)

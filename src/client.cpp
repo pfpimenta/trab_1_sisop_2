@@ -55,6 +55,7 @@ typedef struct __communication_params{
   char* profile_name;
   char* server_ip_address;
   int port;
+  int local_listen_port;
 } communication_params;
 
 std::list<packet> packets_to_send_fifo;
@@ -83,7 +84,7 @@ int read_message(int socketfd, char* buffer)
   int n;
 	n = read(socketfd, buffer, BUFFER_SIZE);
 	if (n <= 0) {
-		printf("ERROR reading from socket\n");
+		// printf("ERROR reading from socket\n");
     return -1;
   } else {
     return 0; // received message in buffer
@@ -133,14 +134,14 @@ int setup_socket(communication_params params)
   return socketfd;
 }
 
-int send_connect_message(int socketfd, char* profile_name)
+int send_connect_message(int socketfd, char* profile_name, int local_listen_port)
 {
   char buffer[BUFFER_SIZE];
   char payload[PAYLOAD_SIZE];
   packet packet_to_send, packet_received;
 
   // send CONNECT message
-  snprintf(payload, PAYLOAD_SIZE, "%s", profile_name); // char* to char[]
+  snprintf(payload, PAYLOAD_SIZE, "%s,%d", profile_name, local_listen_port); // char* to char[]
   packet_to_send = create_packet(payload, 0, seqn);
   serialize_packet(packet_to_send, buffer);
   write_message(socketfd, buffer);
@@ -300,7 +301,7 @@ void * communication_thread(void *arg) {
   int status = -1;
   int num_tries = 0;
   while(status != 0 || num_tries > MAX_TRIES){
-    status = send_connect_message(socketfd, params.profile_name);
+    status = send_connect_message(socketfd, params.profile_name, params.local_listen_port);
     num_tries++;
     sleep(1);
   }
@@ -433,13 +434,14 @@ int main(int argc, char*argv[])
   std::signal(SIGABRT, exit_hook_handler);
 
   // get arguments
-  if (argc != 4) {
-		fprintf(stderr,"usage: %s <profile_name> <server_ip_address> <port>\n", argv[0]);
+  if (argc != 5) {
+		fprintf(stderr,"usage: %s <profile_name> <server_ip_address> <port> <local_listen_port>\n", argv[0]);
 		exit(0);
   } else {
     communication_parameters.profile_name = argv[1];
     communication_parameters.server_ip_address = argv[2];
     communication_parameters.port = atoi(argv[3]);
+    communication_parameters.local_listen_port = atoi(argv[4]);
   }
   
   // create thread for receiving server packets

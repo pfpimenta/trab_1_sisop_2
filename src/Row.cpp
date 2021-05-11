@@ -8,18 +8,21 @@ Row::Row(){
 	this->reader_counter = 0;
 }
 
-void Row::startSession(){
-	pthread_mutex_lock(&(this->read_write_mutex));
-	this->active_sessions += 1;
-	// TODO
-	// new_session
-	// this->sessions.push_back(new_session);
-	pthread_mutex_unlock(&(this->read_write_mutex));
-}
+// void Row::startSession(){
+// 	pthread_mutex_lock(&(this->read_write_mutex));
+// 	this->active_sessions += 1;
+// 	// TODO
+// 	// new_session
+// 	// this->sessions.push_back(new_session);
+// 	pthread_mutex_unlock(&(this->read_write_mutex));
+// }
 
-void Row::closeSession(){
+void Row::closeSession(int session_id){
 	pthread_mutex_lock(&(this->read_write_mutex));
 	this->active_sessions -= 1;
+	session_struct* session = this->sessions.find(&session_id)->second;
+	free(session);
+	this->sessions.erase(&session_id);
 	pthread_mutex_unlock(&(this->read_write_mutex));
 }
 
@@ -30,7 +33,7 @@ int Row::getActiveSessions(){
 	return num_active_sessions;
 }
 
-bool Row::connectUser(){
+bool Row::connectUser(session_struct new_session){
 	bool connectionSuccessfull;
 	pthread_mutex_lock(&(this->read_write_mutex));
 	if(this->active_sessions >= 2){
@@ -38,6 +41,11 @@ bool Row::connectUser(){
 	} else {
 		this->active_sessions += 1;
 		connectionSuccessfull = true;
+		int* new_session_id = (int*)malloc(sizeof(int));
+		*new_session_id = new_session.session_id;
+		session_struct* new_session_ptr = (session_struct*)malloc(sizeof(session_struct));
+		*new_session_ptr = new_session;
+		this->sessions.insert( std::make_pair( new_session_id, new_session_ptr) );
 	}
 	pthread_mutex_unlock(&(this->read_write_mutex));
 	return connectionSuccessfull;

@@ -1,4 +1,3 @@
--> atualizar as rows (para guardar o map de sessões)
 
 -> inicializar o backup
 
@@ -41,8 +40,6 @@
 -> ao eleger um novo servidor primario
 	-> checar se cada sessao continua viva
 
--> cliente: espera a resposta antes de enviar a proxima mensagem
-
 -> hook on exit, ctrl+c, ctrl+d (do servidor):
 	-> mandar logout message do servidor pro cliente
 
@@ -58,10 +55,6 @@
 
 // bugfixes
 -> client dá segfault quando tenta iniciar uma terceira sessão do mesmo username
-
--> client, quando tenta dar follow em um user que já tá seguindo, mensagem de erro com lixo nos nomes de usuários (string gerada pelo server errada? garbled text)
-
--> mensagem no cliente "ERROR reading from socket" não deveria aparecer
 
 -> server dá segfault quando recebe ctrl+c
 	-> deveria também enviar um disconnect/shutdown pra avisar os usuários que está desligando?

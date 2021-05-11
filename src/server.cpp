@@ -22,6 +22,9 @@
 #include <unistd.h>
 #include <utility>
 
+#include <arpa/inet.h>
+
+#include "../include/session.hpp"
 #include "../include/packet.hpp"
 #include "../include/Row.hpp"
 #include "../include/MasterTable.hpp"
@@ -45,24 +48,36 @@ typedef struct __communication_params{
   int remote_primary_server_port;
 } communication_params;
 
+typedef struct __client {
+  char* ip;
+  int port;
+  int socketfd;
+} client_struct;
+
 typedef struct __server {
-  int id;
+  int server_id;
   char* ip;
   int port;
 } server_struct;
 
-// TODO mutexes, transformar em classe!
-std::map< int*, server_struct* > servers_table;
+int next_session_id = 0;
 
-// TODO mutexes, jogar na classe!
-int gid = 0;
-int myServerID = -1;
+// TODO mutexes, transformar em classe!
+// std::map< int*, server_struct* > servers_table;
 
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
 
 // Global primary flag
-bool is_primary = true;	
+bool is_primary = true;
+
+int get_next_session_id(){
+	pthread_mutex_lock(&termination_signal_mutex);
+	int session_id = next_session_id;
+	next_session_id++;
+	pthread_mutex_unlock(&termination_signal_mutex);
+	return session_id;
+}
 
 bool get_termination_signal(){
   pthread_mutex_lock(&termination_signal_mutex);
@@ -182,7 +197,7 @@ int receive_ack(int socket, int seqn){
 	}
 }
 
-void send_ack_to_client(int socket, int reference_seqn)
+void send_ACK(int socket, int reference_seqn)
 {
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
@@ -221,7 +236,7 @@ void receive_FOLLOW(packet received_packet, int socket, std::string currentUser)
 	int status = masterTable->followUser(newFollowedUsername, currentUser);
 	switch(status){
 		case 0:
-			send_ack_to_client(socket, received_packet.seqn);
+			send_ACK(socket, received_packet.seqn);
 			std::cout << currentUser + " is now following " + newFollowedUsername + "." << std::endl; fflush(stdout);
 			break;
 		case -1:
@@ -243,21 +258,40 @@ void receive_FOLLOW(packet received_packet, int socket, std::string currentUser)
 	}
 }
 
-
-std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thread_id){
+std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thread_id, int seqn, int session_id){
 	char payload[PAYLOAD_SIZE];
 	Row* currentRow;
-	std::string currentUser(received_packet._payload); //copying char array into proper std::string type
+
+	// parse username and port
+	char* token;
+	const char delimiter[2] = ",";
+	char* rest = received_packet._payload;
+	int payload_size = strlen(received_packet._payload);
+	received_packet._payload[payload_size] = '\0';
+	// parse current_user
+	token = strtok_r(rest, delimiter, &rest);
+	std::string current_user(token);
+	// parse client listen port
+	token = strtok_r(rest, delimiter, &rest);
+	int client_listen_port = atoi(token);
 
 	// check if map already has the username in there before inserting
-	masterTable->addUserIfNotExists(currentUser);
-	std::cout << "User " + currentUser + " is connecting...";
+	masterTable->addUserIfNotExists(current_user);
+	std::cout << "User " + current_user + " is connecting...";
 
-	currentRow = masterTable->getRow(currentUser);
+	currentRow = masterTable->getRow(current_user);
 	
-	if(currentRow->connectUser())
+	// create session struct
+	struct sockaddr addr;
+	socklen_t len = sizeof(addr);
+	getpeername(socketfd, &addr, &len);
+	struct sockaddr_in *addr_in = (struct sockaddr_in *)&addr;
+	char *ip = inet_ntoa(addr_in->sin_addr);
+	session_struct new_session = create_session(session_id, ip, client_listen_port, seqn, (int)received_packet.seqn);
+
+	if(currentRow->connectUser(new_session))
 	{
-		send_ack_to_client(socketfd, received_packet.seqn);
+		send_ACK(socketfd, received_packet.seqn);
 		std::cout << " connected." << std::endl;
 	} else{
 		snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
@@ -265,12 +299,12 @@ std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thre
 		printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
 		closeConnection(socketfd, (int)thread_id);
 	}
-	return currentUser;
+	return current_user;
 }
 
-void receive_DISCONNECT(std::string currentUser, int socket, pthread_t thread_id){
+void receive_DISCONNECT(std::string currentUser, int socket, pthread_t thread_id, int session_id){
 	Row* currentRow = masterTable->getRow(currentUser);
-	currentRow->closeSession();
+	currentRow->closeSession(session_id);
 	std::cout << currentUser + " has disconnected. Session closed. Terminating thread " << (int)thread_id << std::endl;
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to gracefully shutdown a connection socket. Forcing..." << std::endl;
@@ -309,6 +343,7 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 		return -1;
 	}
 }
+
 
 int send_update_to_backup(int current_server_id, int seqn, int socket){
 	char payload[PAYLOAD_SIZE];
@@ -397,11 +432,22 @@ void * servers_socket_thread(void *arg) {
 
 				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
 					// already received this message
-					send_ack_to_client(socket, received_packet.seqn);
-				} else if (received_packet.type == TYPE_ACK) {
-					// TODO
+					send_ACK(socket, received_packet.seqn);
 				} else {
-					std::cout << "Invalid message type from backup server" << std::endl;
+					switch (received_packet.type) {
+						case TYPE_HEARTBEAT:
+						{
+							max_reference_seqn = received_packet.seqn;
+							send_ACK(socket, received_packet.seqn);
+							break;
+						}
+						case TYPE_ACK:
+						{
+							// TODO
+							// receive_backup_ACK(received_packet, socket, thread_id);
+							break;
+						}
+					}
 				}
 			}
 		}
@@ -429,6 +475,7 @@ void * socket_thread(void *arg) {
 	int send_tries = 0;
 	int size = 0;
 	int seqn = 0;
+	int session_id;
 	int status;
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
 	char client_message[BUFFER_SIZE];
@@ -464,13 +511,14 @@ void * socket_thread(void *arg) {
 
 				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
 					// already received this message
-					send_ack_to_client(socket, received_packet.seqn);
+					send_ACK(socket, received_packet.seqn);
 				} else {
 					switch (received_packet.type) {
 						case TYPE_CONNECT:
 						{
 							max_reference_seqn = received_packet.seqn;
-							currentUser = receive_CONNECT(received_packet, socket, thread_id);
+							session_id = get_next_session_id();
+							currentUser = receive_CONNECT(received_packet, socket, thread_id, seqn, session_id);
 							break;
 						}
 						case TYPE_FOLLOW:
@@ -484,13 +532,13 @@ void * socket_thread(void *arg) {
 							max_reference_seqn = received_packet.seqn;
 							std::string message(received_packet._payload); //copying char array into proper std::string type
 							masterTable->sendMessageToFollowers(currentUser, message);
-							send_ack_to_client(socket, received_packet.seqn);
+							send_ACK(socket, received_packet.seqn);
 							break;
 						}
 						case TYPE_DISCONNECT:
 						{
 							max_reference_seqn = received_packet.seqn;
-							receive_DISCONNECT(currentUser, socket, thread_id);
+							receive_DISCONNECT(currentUser, socket, thread_id, session_id);
 							break;
 						}
 						case TYPE_ACK:
@@ -518,7 +566,7 @@ void * socket_thread(void *arg) {
 
 	printf("Exiting socket thread: %d\n", (int)thread_id);
 	currentRow = masterTable->getRow(currentUser);
-	currentRow->closeSession();
+	currentRow->closeSession(session_id);
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to shutdown a connection socket." << std::endl;
 	}
@@ -601,8 +649,8 @@ int main(int argc, char *argv[])
 			if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
 				std::cout << "Failed to allocate enough memory for the newsockptr. (clients)" << std::endl;
 				exit(-1);
-			}	
-			
+			}
+
 			*newsockptr = newsockfd;
 			if (pthread_create(&newthread, NULL, socket_thread, newsockptr) != 0 ) {
 				printf("Failed to create clients socket thread\n");

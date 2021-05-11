@@ -10,9 +10,9 @@ client.o: src/client.cpp include/packet.hpp
 	g++ $(CFLAGS) -o client.o -c src/client.cpp $(LDFLAGS)
 	
 server: Row.o MasterTable.o packet.o server.o session.o
-	g++ $(CFLAGS) -o server server.o packet.o Row.o MasterTable.o $(LDFLAGS)
+	g++ $(CFLAGS) -o server server.o packet.o Row.o MasterTable.o session.o $(LDFLAGS)
 
-server.o: src/server.cpp include/packet.hpp
+server.o: src/server.cpp include/packet.hpp include/session.hpp
 	g++ $(CFLAGS) -o server.o -c src/server.cpp $(LDFLAGS)
 
 packet.o: src/packet.cpp include/packet.hpp
