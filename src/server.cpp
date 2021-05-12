@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <arpa/inet.h>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -23,23 +24,17 @@
 #include <unistd.h>
 #include <utility>
 
-#include <arpa/inet.h>
-
 #include "../include/session.hpp"
 #include "../include/packet.hpp"
 #include "../include/Row.hpp"
 #include "../include/MasterTable.hpp"
 
-MasterTable* masterTable;
-
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define PORT 4000
 #define MAX_THREADS 30 // maximum number of threads allowed
-#define BUFFER_SIZE 256
-#define PAYLOAD_SIZE 128
 #define MAX_TRIES 3 // maximum number of tries to send a notification to a client
-
+#define UNDEFINED_ID -1
 
 typedef struct __communication_params{
   char* profile_name;
@@ -70,16 +65,20 @@ typedef struct __server {
 
 int next_session_id = 0;
 
+// TODO mutex
+int my_backup_id;
+int num_backup_servers = 0; // never decrements. used for attributing new backup server_ids
+
+MasterTable* masterTable;
+
 // TODO mutexes, transformar em classe!
-// std::map< int*, server_struct* > servers_table;
+std::map< int*, server_struct* > servers_table;
 
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
 
 // Global primary flag
 bool is_primary = true;
-
-int num_backup_servers = 0;
 
 // parameters of this server (passed as arguments in the terminal console)
 server_params server_parameters;
@@ -184,7 +183,7 @@ int setup_socket(communication_params params)
 }
 
 // opens a socket, binds it, and starts listening for incoming connections
-int send_listen_socket(int port)
+int setup_listen_socket(int port)
 {
 	int sockfd;
     struct sockaddr_in serv_addr;
@@ -291,6 +290,8 @@ void send_notification(int socket, Row* currentRow, int seqn) {
 void receive_FOLLOW(packet received_packet, int socket, std::string currentUser){
 	std::string newFollowedUsername(received_packet._payload); //copying char array into proper std::string type
 	char payload[PAYLOAD_SIZE];
+	bzero(payload, PAYLOAD_SIZE); //clear buffer
+
 
 	int status = masterTable->followUser(newFollowedUsername, currentUser);
 	switch(status){
@@ -353,6 +354,7 @@ std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thre
 		send_ACK(socketfd, received_packet.seqn);
 		std::cout << " connected." << std::endl;
 	} else{
+		bzero(payload, PAYLOAD_SIZE); //clear buffer
 		snprintf(payload, PAYLOAD_SIZE, "ERROR: user already connected with 2 sessions! (Limit reached)\n");
 		send_error_to_client(socketfd, received_packet.seqn, payload);
 		printf("\n denied: there are already 2 active sessions!\n"); fflush(stdout);
@@ -377,6 +379,7 @@ int receive_SET_ID(int socket){
 	char buffer[BUFFER_SIZE];		
 	int size = 0;
 	packet received_packet;
+	bzero(buffer, BUFFER_SIZE); //clear buffer
 
 	// receive message
 	while(size < 1){
@@ -432,14 +435,15 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 	}
 }
 
-int receive_CONNECT_SERVER(int socketfd){
+server_struct receive_CONNECT_SERVER(int socketfd){
 	// TODO : se o primary nao receber nada, essa thread vai ficar rodando em loop aqui
 	char buffer[BUFFER_SIZE];		
 	int size = 0;
 	packet received_packet;
-	int port;
+	server_struct server_info;
 
 	// receive CONNECT_SERVER message
+	bzero(buffer, BUFFER_SIZE); //clear buffer
 	while(size < 1){
 		// try to read until it receives the message
 		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
@@ -453,23 +457,39 @@ int receive_CONNECT_SERVER(int socketfd){
 	{
 		strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 		received_packet = buffer_to_packet(buffer);
-		port = atoi(received_packet._payload);
+		if(received_packet.type != TYPE_CONNECT_SERVER){
+			// packet is discarded
+			printf("ERROR: received wrong packet type from incoming server connection.\n");fflush(stdout);
+			terminate_thread_and_socket(socketfd);
+		} else{
+			// parse port and backup_id
+			char* token;
+			const char delimiter[2] = ",";
+			char* rest = received_packet._payload;
+			int payload_size = strlen(received_packet._payload);
+			received_packet._payload[payload_size] = '\0';
+			// parse port
+			token = strtok_r(rest, delimiter, &rest);
+			server_info.port = atoi(token);
+			// parse backup_id
+			token = strtok_r(rest, delimiter, &rest);
+			server_info.server_id = atoi(token);
+		}
 	}
-
 	send_ACK(socketfd, received_packet.seqn);
 
-	return port;
+	return server_info;
 }
 
-int send_updates_to_backup(int current_server_id, int seqn, int socket){
-	char payload[PAYLOAD_SIZE];
-	char buffer[BUFFER_SIZE];
-	packet packet_to_send;
+int send_UPDATE_BACKUP(int current_server_id, int seqn, int socket){
+	// char payload[PAYLOAD_SIZE];
+	// char buffer[BUFFER_SIZE];
+	// packet packet_to_send;
 	if(current_server_id != -1) // if the backup has already connected
 	{
 		// TODO
 	}
-	return 0;
+	return -1;
 }
 
 int send_message_to_client(std::string currentUser, int seqn, int socket){
@@ -520,7 +540,7 @@ int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 
 	// send CONNECT_SERVER packet to primary server
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
-	snprintf(payload, PAYLOAD_SIZE, "%d", port);
+	snprintf(payload, PAYLOAD_SIZE, "%d,%d", port, my_backup_id);
 	packet_to_send = create_packet(payload, TYPE_CONNECT_SERVER, seqn);
 	serialize_packet(packet_to_send, buffer);
 	write_message(socketfd, buffer);
@@ -551,7 +571,7 @@ int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 	return -1;
 }
 
-int send_ping_to_primary(int socketfd, int seqn){
+void send_ping_to_primary(int socketfd, int seqn){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
@@ -564,7 +584,7 @@ int send_ping_to_primary(int socketfd, int seqn){
 int send_SET_ID(int socketfd, int seqn, int backup_id){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
-	int status, size;
+	int size;
 	int send_tries = 0;
 	packet received_packet, packet_to_send;
 
@@ -590,6 +610,7 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
+					std::cout << "DEBUG recebeu ACK pelo SET_ID" << std::endl;
 					return 0;
 				}
 			}
@@ -611,7 +632,6 @@ void * primary_communication_thread(void *arg) {
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
 	char buffer[BUFFER_SIZE];
 	char backup_server_message[BUFFER_SIZE];		
-	int current_server_id = -1;
 	packet received_packet;
 	time_t t0, t1;
 
@@ -631,9 +651,8 @@ void * primary_communication_thread(void *arg) {
 	}
 
 	// receber SET_ID
-	int backup_id = receive_SET_ID(socket);
-	printf("DEBUG received id: %d\n", backup_id); fflush(stdout);
-
+	my_backup_id = receive_SET_ID(socket);
+	printf("DEBUG received id: %d\n", my_backup_id); fflush(stdout);
 
 	// inicia timer e manda primeiro ping
 	t0 = std::time(0); // get timestamp
@@ -722,34 +741,44 @@ void * servers_socket_thread(void *arg) {
 	int size = 0;
 	int seqn = 0;
 	int status;
-	int backup_id;
 	int max_reference_seqn = -1; // TODO temos que enviar isso pras replicas backup
 	char buffer[BUFFER_SIZE];
 	char backup_server_message[BUFFER_SIZE];		
 	int current_server_id = -1;
 	packet received_packet;
 
-	// print pthread id
-	pthread_t thread_id = pthread_self();
-
 	// setting socket to NON-BLOCKING mode
 	set_socket_to_non_blocking_mode(socket);
 
 	// receive CONNECT_SERVER
-	int backup_port = receive_CONNECT_SERVER(socket);
-	printf("DEBUG received backup_port: %d\n", backup_port); fflush(stdout);
+	server_struct backup_infos = receive_CONNECT_SERVER(socket);
+	printf("DEBUG received backup_port: %d\n", backup_infos.port); fflush(stdout);
 
+	// set server_id if it is not set yet
+	if(backup_infos.server_id == UNDEFINED_ID){
+		num_backup_servers++;
+		backup_infos.server_id = num_backup_servers;
+	}
+	int* server_id_ptr = (int*)malloc(sizeof(int));
+	*server_id_ptr = backup_infos.server_id;
+
+	// check if this backup server is already in servers_table
+	if(servers_table.find(server_id_ptr) == servers_table.end()){
+		// this backup server is not yet in the table... adding it!
+		server_struct* backup_infos_ptr = (server_struct*)malloc(sizeof(server_struct));
+		*backup_infos_ptr = backup_infos;
+		servers_table.insert(std::make_pair( server_id_ptr, backup_infos_ptr));
+	}
 
 	// send SET_ID (attribute a new unique incremented ID to the server)
-	num_backup_servers++;
-	backup_id = num_backup_servers;
-	status = send_SET_ID(socket, seqn, backup_id);
+	status = send_SET_ID(socket, seqn, backup_infos.server_id);
 	if(status == 0){
 		seqn++;
 	} else {
 		printf("ERROR: could not send ID to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socket);
 	}
+
 
 	do {
 		// receive message
@@ -779,7 +808,7 @@ void * servers_socket_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
-							// TODO
+							send_tries = 0;
 							break;
 						}
 					}
@@ -790,15 +819,18 @@ void * servers_socket_thread(void *arg) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
 		// send update, if there is any
-		status = send_updates_to_backup(current_server_id, seqn, socket);
+		status = send_UPDATE_BACKUP(current_server_id, seqn, socket);
 		if(status == 0){
 			send_tries++;
 		} else {
 			sleep(1);
 		}
-  	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
-
-	printf("Exiting socket thread: %d\n", (int)thread_id);
+  	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
+	if(get_termination_signal() == true){
+		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
+	} else if(send_tries > MAX_TRIES){
+		std::cout << "Backup server does not respond. Closing thread and socket." << std::endl;
+	}
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to shutdown a connection socket." << std::endl;
 	}
@@ -833,6 +865,12 @@ void * socket_thread(void *arg) {
 	memset(client_message, 0, sizeof client_message);
 
 	do{
+		// send message, if there is any
+		status = send_message_to_client(currentUser, seqn, socket);
+		if(status == 0){
+			send_tries++;
+		}
+
 		// receive message
 		size = recv(socket, client_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
@@ -891,17 +929,13 @@ void * socket_thread(void *arg) {
 				}
 			}
 		}
-
-		sleep(1);
-
-		// send message, if there is any
-		status = send_message_to_client(currentUser, seqn, socket);
-		if(status == 0){
-			send_tries++;
-		}
-  	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
-
-	printf("Exiting socket thread: %d\n", (int)thread_id);
+		sleep(2);
+  	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
+	if(get_termination_signal() == true){
+		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
+	} else if(send_tries > MAX_TRIES){
+		std::cout << "Client does not respond. Closing thread and socket." << std::endl;
+	}
 	currentRow = masterTable->getRow(currentUser);
 	currentRow->closeSession(session_id);
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
@@ -967,8 +1001,8 @@ int main(int argc, char *argv[])
 	masterTable->load_backup_table();
 
 	// setup LISTEN sockets
-    clients_sockfd = send_listen_socket(server_parameters.local_clients_listen_port);
-	servers_sockfd = send_listen_socket(server_parameters.local_servers_listen_port);
+    clients_sockfd = setup_listen_socket(server_parameters.local_clients_listen_port);
+	servers_sockfd = setup_listen_socket(server_parameters.local_servers_listen_port);
 
 	printf("Now listening for incoming connections... \n\n");
 
@@ -976,15 +1010,19 @@ int main(int argc, char *argv[])
 
 	// TODO : criar uma thread e connexao (socket) para cada backup
 
-	// If server is of type BACKUP, then open connection to the primary and spawn a thread
-	if (is_primary == false) {
+	if(is_primary){
+		my_backup_id = 0;
+	} else {
+		std::cout << "I'm a backup server!" << std::endl;
+		// If server is of type BACKUP, then open connection to the primary and spawn a thread
+
+		my_backup_id = UNDEFINED_ID; // will solicitate ID to primary
+
 		// criar socket e conectar ao primary
 		communication_params params;
 		params.port = server_parameters.remote_primary_server_port;
 		params.server_ip_address = server_parameters.remote_primary_server_ip_address;
 		newsockfd = setup_socket(params);
-
-		std::cout << "DEBUG connected to primary!" << std::endl;
 
 		if((newsockptr = (int*)malloc(sizeof(int))) == NULL) {
 			std::cout << "Failed to allocate enough memory for the newsockptr. (servers)" << std::endl;
@@ -1000,7 +1038,7 @@ int main(int argc, char *argv[])
 			threads_list.push_back(newthread);
 			socketptrs_list.push_back(newsockptr);
 		}
-	}
+	} 
 
 	// loop that accepts new connections and allocates threads to deal with them
 	while(1) {
@@ -1072,6 +1110,6 @@ int main(int argc, char *argv[])
 			exit(0);
 		}
 
-		sleep(1);
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
 }

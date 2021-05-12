@@ -27,7 +27,6 @@ class Row {
 		pthread_mutex_t reader_mutex = PTHREAD_MUTEX_INITIALIZER;
 		std::map< int*, session_struct*> sessions;
 
-
 	public:
 		Row();
 		// void startSession(); // TODO delete

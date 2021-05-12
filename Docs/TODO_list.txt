@@ -1,9 +1,16 @@
 -> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
 	-> a cada modificação, essa lista é propagada pros backups
 
--> na conexao de um novo backup, primario deve mandar todas as informaçoes pro backup
+-> replicação das infos do RM primario para os backups
+	-> COLD: na conexao de um novo backup, primario deve mandar todas as informaçoes pro backup
+		-> update_row for each row (master_table
+		-> update_backup for each backup (servers_table)
+			-> num_backup_servers pode ser deduzido disso (maximo entre backup.server_id)
+	-> HOT: a cada atualização
+		-> update_row
+		-> update_backup (causa: novo servidor backup foi conectado)
+			-> atualiza num_backup_servers se necessario (maximo entre backup.server_id)
 
--> replicação das atualizações do RM primario para os backups
 
 -> sistema de timeout e retransmissao (dos dois lados)
 	-> cliente: tenta mandar 3x, dai desliga
@@ -17,21 +24,24 @@
 
 -> dps da eleiçao, servidor primário avisar cada cliente que agora é o primário
 
--> ao eleger um novo servidor primario
-	-> checar se cada sessao continua viva
+
+//////////////////////////////
+// extra features:
 
 -> hook on exit, ctrl+c, ctrl+d (do servidor):
 	-> mandar logout message do servidor pro cliente
 
+-> ao eleger um novo servidor primario
+	-> checar se cada sessao continua viva
 
+-> play mp3
+
+//////////////////////////////
 // edge cases:
 -> quando o numero de clientes for grande o suficiente para
    que as filas de mensagem de cada um demorem mais do que
    os segundo de sleep para serem lidas
 	-> perda de mensagens
-
-
-
 
 // bugfixes
 -> client dá segfault quando tenta iniciar uma terceira sessão do mesmo username

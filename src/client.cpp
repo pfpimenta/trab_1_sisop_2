@@ -321,9 +321,6 @@ void * communication_thread(void *arg) {
 	communication_params params = *((communication_params *)arg);
   int socketfd;
 
-  // print pthread id
-	pthread_t thread_id = pthread_self();
-
   // setup socket and send CONNECT message
   socketfd = setup_socket(params);
   int status = -1;
@@ -337,12 +334,13 @@ void * communication_thread(void *arg) {
   communication_loop(socketfd);
 
   terminate_thread_and_socket(socketfd);
+	pthread_exit(NULL);
 }
 
 
 // function for the thread that receives a server change message
 // from the new primary server
-void* server_change_thread(void *arg) {
+void * server_change_thread(void *arg) {
   int socketfd = *((int *)arg);
   char buffer[BUFFER_SIZE];
   packet received_packet;
@@ -389,6 +387,8 @@ void* server_change_thread(void *arg) {
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
+  terminate_thread_and_socket(socketfd);
+	pthread_exit(NULL);
 }
 
 // function for the thread that keeps listening for
@@ -426,6 +426,7 @@ void * listen_thread(void *arg) {
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
+    pthread_exit(NULL);
 }
 
 

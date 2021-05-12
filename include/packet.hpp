@@ -4,8 +4,8 @@
 #include <string>
 #include <string.h>
 
-#define BUFFER_SIZE 256
-#define PAYLOAD_SIZE 128
+#define PAYLOAD_SIZE 60000
+#define BUFFER_SIZE PAYLOAD_SIZE+50
 
 #define TYPE_CONNECT 0
 #define TYPE_FOLLOW 1
@@ -36,7 +36,7 @@ typedef struct __packet{
         // 9 - UPDATE_BACKUP (server_struct)
         // 10 - HEARTBEAT
         // 11 - SERVER_CHANGE (ip, port)
-        // 12 - CONNECT_SERVER (port)
+        // 12 - CONNECT_SERVER (port, backup_id)
     uint16_t seqn; // Número de sequência
     uint16_t length; // Comprimento do payload
     char* _payload; // Dados da mensagem
