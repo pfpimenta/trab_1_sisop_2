@@ -1,6 +1,3 @@
--> colocar no RM primario a lista de todos RMs backups (ao iniciar e/ou na morte um RM backup)
-	-> a cada modificação, essa lista é propagada pros backups
-
 -> replicação das infos do RM primario para os backups
 	-> COLD: na conexao de um novo backup, primario deve mandar todas as informaçoes pro backup
 		-> update_row for each row (master_table
@@ -11,11 +8,6 @@
 		-> update_backup (causa: novo servidor backup foi conectado)
 			-> atualiza num_backup_servers se necessario (maximo entre backup.server_id)
 
-
--> sistema de timeout e retransmissao (dos dois lados)
-	-> cliente: tenta mandar 3x, dai desliga
-	-> servidor: tenta mandar 3x, dai mata a sessao mas deixa a notificacao na lista
-
 -> nova porta listen do cliente:
 	-> para receber aviso de troca de server primario
 	-> cliente deve informar ao servidor o IP e porta desse socket ao conectar (CONNECT)
@@ -24,6 +16,11 @@
 
 -> dps da eleiçao, servidor primário avisar cada cliente que agora é o primário
 
+-> printar infomacoes persistidas
+	-> funcao de printar servers_table
+	-> funcao de printar master_table
+
+-> BUG: ctrl+C e ctrl+D parou de funcionar
 
 //////////////////////////////
 // extra features:
@@ -40,6 +37,10 @@
 	-> checar se cada sessao continua viva
 
 -> botar funcoes em comum de server.cpp e client.cpp num arquivo compartilhado
+
+-> sistema de timeout e retransmissao (dos dois lados)
+	-> cliente: tenta mandar 3x, dai desliga
+	-> servidor: tenta mandar 3x, dai mata a sessao mas deixa a notificacao na lista
 
 -> play mp3
 

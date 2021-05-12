@@ -1,4 +1,3 @@
-
 #include "../include/packet.hpp"
 
 packet create_packet(char* message, int packet_type, int seqn)

@@ -22,6 +22,47 @@ bool is_primary = true;
 // parameters of this server (passed as arguments in the terminal console)
 server_params server_parameters;
 
+// serializes the server_struct and puts it in the buffer
+void serialize_server_struct(server_struct server_infos, char* buffer)
+{
+  memset(buffer, 0, BUFFER_SIZE * sizeof(char));
+  snprintf(buffer, BUFFER_SIZE, "%d,%s,%d\n",
+          server_infos.server_id, server_infos.ip, server_infos.port);
+}
+
+// unserializes the server_struct and puts it in the buffer
+server_struct unserialize_server_struct(char* buffer)
+{
+  server_struct server_infos;
+  char payload[PAYLOAD_SIZE];
+
+  int buffer_size = strlen(buffer);
+  buffer[buffer_size] = '\0';
+  char* token;
+  const char delimiter[2] = ",";
+  char* rest = buffer;
+  
+  // server_id
+  token = strtok_r(rest, delimiter, &rest);
+  server_infos.server_id = atoi(token);
+
+  // ip
+  bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+  token = strtok_r(rest, delimiter, &rest);
+  int ip_len = strlen(token);
+  strncpy(payload, token, ip_len);
+  payload[ip_len] = '\0';
+  server_infos.ip = (char*) malloc((ip_len) * sizeof(char) + 1);
+  memcpy(server_infos.ip, payload, (ip_len) * sizeof(char) + 1);
+
+  // port
+  token = strtok_r(rest, "", &rest);
+  server_infos.port = atoi(token);
+
+  return server_infos;
+}
+
+
 int get_next_session_id(){
 	pthread_mutex_lock(&termination_signal_mutex);
 	int session_id = next_session_id;
@@ -185,18 +226,6 @@ void blocking_read_message(int socketfd, char* buffer)
 	} while(n < 0);
 }
 
-int receive_ack(int socket, int seqn){
-	char buffer[BUFFER_SIZE];
-	packet packet_received;
-	blocking_read_message(socket, buffer);
-	packet_received = buffer_to_packet(buffer);
-	if(packet_received.seqn == seqn && packet_received.type == TYPE_ACK){
-		return 0;
-	} else {
-		return -1;
-	}
-}
-
 void send_ACK(int socket, int reference_seqn)
 {
 	char payload[PAYLOAD_SIZE];
@@ -288,11 +317,12 @@ std::string receive_CONNECT(packet received_packet, int socketfd, pthread_t thre
 	socklen_t len = sizeof(addr);
 	getpeername(socketfd, &addr, &len);
 	struct sockaddr_in *addr_in = (struct sockaddr_in *)&addr;
-	char *ip = inet_ntoa(addr_in->sin_addr);
+	char* ip = inet_ntoa(addr_in->sin_addr);
 	session_struct new_session = create_session(session_id, ip, client_listen_port, seqn, (int)received_packet.seqn);
 
 	if(currentRow->connectUser(new_session))
 	{
+		// TODO hot UPDATE_ 
 		send_ACK(socketfd, received_packet.seqn);
 		std::cout << " connected." << std::endl;
 	} else{
@@ -420,18 +450,146 @@ server_struct receive_CONNECT_SERVER(int socketfd){
 	}
 	send_ACK(socketfd, received_packet.seqn);
 
+	// get backup IP from socket
+	struct sockaddr addr;
+	socklen_t len = sizeof(addr);
+	getpeername(socketfd, &addr, &len);
+	struct sockaddr_in *addr_in = (struct sockaddr_in *)&addr;
+	server_info.ip = inet_ntoa(addr_in->sin_addr);
+
 	return server_info;
 }
 
-int send_UPDATE_BACKUP(int current_server_id, int seqn, int socket){
-	// char payload[PAYLOAD_SIZE];
-	// char buffer[BUFFER_SIZE];
-	// packet packet_to_send;
-	if(current_server_id != -1) // if the backup has already connected
-	{
-		// TODO
-	}
+int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
+	int size;
+	int send_tries = 0;
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	packet packet_to_send, received_packet;
+	server_struct backup_infos;
+	server_struct* backup_infos_ptr;
+
+	// get server_struct
+	backup_infos_ptr = servers_table.find(&backup_id)->second;
+	backup_infos = *backup_infos_ptr;
+
+	// send UPDATE_BACKUP packet
+	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+	serialize_server_struct(backup_infos, payload);
+	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
+	serialize_packet(packet_to_send, buffer);
+	write_message(socketfd, buffer);
+
+	// receive ACK from backup
+	do {
+		// receive message
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			buffer[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+			char* rest_packet = buffer;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+				if(received_packet.type == TYPE_ACK){
+					return 0;
+				}
+			}
+		}
+		write_message(socketfd, buffer);
+		send_tries++;
+		sleep(1);
+	} while(send_tries <= MAX_TRIES);
+
 	return -1;
+}
+
+// cold send all server_struct inside servers_table
+int send_all_servers_table(int socketfd, int seqn){
+	int send_tries = 0;
+	packet received_packet;
+	char buffer[BUFFER_SIZE];
+	int status;
+
+	// TODO lock na servers table
+	for (auto const& x : servers_table) {
+		int* id_ptr = x.first;
+		server_struct* server_infos_ptr = x.second;
+
+		status = send_UPDATE_BACKUP(*id_ptr, seqn, socketfd);
+		if(status != 0) {
+			return -1;
+		}
+		seqn++;
+	}
+	return seqn;
+}
+
+int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
+	int size;
+	int send_tries = 0;
+	char payload[PAYLOAD_SIZE];
+	char buffer[BUFFER_SIZE];
+	packet packet_to_send, received_packet;
+
+	// TODO lock na row
+	Row* row = masterTable->getRow(username);
+
+	// send UPDATE_ROW packet
+	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+	row->serialize_row(payload);
+	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
+	write_message(socketfd, buffer);
+
+	// receive ACK from backup
+	do {
+		// receive message
+		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		if (size > 0) {
+			buffer[size] = '\0';
+
+			// parse socket buffer: get several messages, if there are more than one
+			char* token_end_of_packet;
+			char* rest_packet = buffer;
+			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
+			{
+				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
+				received_packet = buffer_to_packet(buffer);
+				if(received_packet.type == TYPE_ACK){
+					return 0;
+				}
+			}
+		}
+		write_message(socketfd, buffer);
+		send_tries++;
+		sleep(1);
+	} while(send_tries <= MAX_TRIES);
+
+	return 0;
+}
+
+// cold send all server_struct inside servers_table
+int send_all_rows(int socketfd, int seqn){
+	int send_tries = 0;
+	packet received_packet;
+	char buffer[BUFFER_SIZE];
+	int status;
+
+	// TODO lock na master table
+	for (auto const& x : masterTable->getTable()) {
+		std::string username = x.first;
+		Row* row = x.second;
+
+		status = send_UPDATE_ROW(username, seqn, socketfd);
+		if(status != 0) {
+			return -1;
+		}
+		seqn++;
+	}
+	return seqn;
 }
 
 int send_message_to_client(std::string currentUser, int seqn, int socket){
@@ -552,7 +710,6 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
-					std::cout << "DEBUG recebeu ACK pelo SET_ID" << std::endl;
 					return 0;
 				}
 			}
@@ -631,6 +788,7 @@ void * primary_communication_thread(void *arg) {
 						{
 							max_reference_seqn = received_packet.seqn;
 							// TODO
+							printf("DEBUG UPDATE_BACKUP payload: %s", received_packet._payload);
 							send_ACK(socket, received_packet.seqn);
 							break;
 						}
@@ -694,7 +852,6 @@ void * servers_socket_thread(void *arg) {
 
 	// receive CONNECT_SERVER
 	server_struct backup_infos = receive_CONNECT_SERVER(socket);
-	printf("DEBUG received backup_port: %d\n", backup_infos.port); fflush(stdout);
 
 	// set server_id if it is not set yet
 	if(backup_infos.server_id == UNDEFINED_ID){
@@ -721,6 +878,19 @@ void * servers_socket_thread(void *arg) {
 		terminate_thread_and_socket(socket);
 	}
 
+	// TODO send cold UPDATE_BACKUP packets
+	seqn = send_all_servers_table(socket, seqn);
+	if(seqn == -1) {
+		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
+		terminate_thread_and_socket(socket);
+	}
+
+	// TODO send cold UPDATE_ROW packets
+	seqn = send_all_rows(socket, seqn);
+	if(seqn == -1) {
+		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
+		terminate_thread_and_socket(socket);
+	}
 
 	do {
 		// receive message
@@ -743,7 +913,6 @@ void * servers_socket_thread(void *arg) {
 					switch (received_packet.type) {
 						case TYPE_HEARTBEAT:
 						{
-							std::cout << "DEBUG received HEARTBEAT... sending ACK" << std::endl;
 							max_reference_seqn = received_packet.seqn;
 							send_ACK(socket, received_packet.seqn);
 							break;
@@ -764,7 +933,6 @@ void * servers_socket_thread(void *arg) {
 		status = send_UPDATE_BACKUP(current_server_id, seqn, socket);
 		if(status == 0){
 			send_tries++;
-		} else {
 			sleep(1);
 		}
   	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);

@@ -14,6 +14,11 @@
 #include "../include/session.hpp"
 #endif
 
+#ifndef PACKET_H
+#define PACKET_H
+#include "../include/packet.hpp"
+#endif
+
 class Row {
 	// a row corresponds to a user
 
@@ -47,6 +52,7 @@ class Row {
 		std::string getNotification();
 		void shared_reader_lock();
 		void shared_reader_unlock();
-		// TODO row_to_string()
-		// TODO string_to_row()
+		void serialize_row(char* buffer);
 };
+
+Row* unserialize_row(char* buffer);

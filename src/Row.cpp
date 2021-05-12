@@ -141,3 +141,26 @@ void Row::shared_reader_unlock(){
 	}
 	pthread_mutex_unlock(&(this->reader_mutex));
 }
+
+void Row::serialize_row(char* buffer){
+	char* followers_buffer;
+	char* messages_to_receive_buffer;
+	char* sessions_buffer;
+ 
+	// TODO serialize followers_buffer
+	// TODO serialize messages_to_receive_buffer
+	// TODO serialize sessions_buffer
+
+	memset(buffer, 0, BUFFER_SIZE * sizeof(char));
+	snprintf(buffer, BUFFER_SIZE, "%d#%B#%s#%s#%s\n",
+		this->active_sessions,
+		this->notification_delivered,
+		followers_buffer,
+		messages_to_receive_buffer,
+		sessions_buffer
+	);
+}
+
+Row* unserialize_row(char* buffer){
+	// TODO
+}

@@ -79,6 +79,9 @@ Row* MasterTable::getRow(std::string username){
 	return currentRow;
 }
 
+std::map< std::string, Row*> MasterTable::getTable(){
+	return this->table;
+}
 
 // saves the master_table into a TXT file
 void MasterTable::save_backup_table()
