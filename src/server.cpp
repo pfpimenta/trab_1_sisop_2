@@ -131,9 +131,12 @@ int write_message(int newsockfd, char* message)
 {
 	/* write in the socket */
     int n;
-	n = write(newsockfd, message, strlen(message));
-	if (n < 0) {
-		printf("ERROR writing to socket\n");
+	n = send(newsockfd, message, strlen(message), MSG_NOSIGNAL);
+	if (n == EPIPE) {
+		std::cout << "ERROR: connection has died. n: " << n << std::endl;
+		return -1;
+	} else if (n < 0) {
+		std::cout << "ERROR writing to socket. n: " << n << std::endl;
 		return -1;
 	} else {
 		return 0;
@@ -635,9 +638,6 @@ void * primary_communication_thread(void *arg) {
 	packet received_packet;
 	time_t t0, t1;
 
-	// print pthread id
-	pthread_t thread_id = pthread_self();
-
 	// setting socket to NON-BLOCKING mode
 	set_socket_to_non_blocking_mode(socket);
 
@@ -651,13 +651,15 @@ void * primary_communication_thread(void *arg) {
 	}
 
 	// receber SET_ID
-	my_backup_id = receive_SET_ID(socket);
-	printf("DEBUG received id: %d\n", my_backup_id); fflush(stdout);
+	int new_backup_id = receive_SET_ID(socket);
+	if(new_backup_id != my_backup_id){
+		my_backup_id = new_backup_id;
+		printf("Assigned id: %d\n", my_backup_id); fflush(stdout);
+	}
 
 	// inicia timer e manda primeiro ping
 	t0 = std::time(0); // get timestamp
 	send_ping_to_primary(socket, seqn);
-	std::cout << "DEBUG sent HEARTBEAT" << std::endl;
 	seqn++;
 
 	do {
@@ -695,7 +697,6 @@ void * primary_communication_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
-							std::cout << "DEBUG received ACK" << std::endl;
 							send_tries = 0;
 							break;
 						}
@@ -710,7 +711,6 @@ void * primary_communication_thread(void *arg) {
 		t1 = std::time(0); // get timestamp atual
 		if(t1 - t0 > 3) // every 3 seconds
 		{
-			std::cout << "DEBUG sent HEARTBEAT" << std::endl;
 			t0 = t1; // reset timer
 			send_tries++;
 			send_ping_to_primary(socket, seqn);
@@ -724,9 +724,12 @@ void * primary_communication_thread(void *arg) {
 			// TODO eleicao
 			// TODO mandar pro cliente SERVER_CHANGE
 		}
-  	}while (get_termination_signal() == false && send_tries < MAX_TRIES);
-
-	printf("Exiting socket thread: %d\n", (int)thread_id);
+  	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
+	if(get_termination_signal() == true){
+		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
+	} else if(send_tries > MAX_TRIES){
+		std::cout << "Primary server does not respond! exiting thread (TODO!)" << std::endl;
+	}
 	if (shutdown(socket, SHUT_RDWR) !=0 ) {
 		std::cout << "Failed to shutdown a connection socket." << std::endl;
 	}
