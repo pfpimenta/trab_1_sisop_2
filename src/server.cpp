@@ -1,67 +1,6 @@
-#include <algorithm>
-#include <arpa/inet.h>
-#include <chrono>
-#include <csignal>
-#include <cstring>
-#include <ctime>
-#include <fcntl.h>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <thread>
-#include <list>
-#include <map>
-#include <netinet/in.h>
-#include <netdb.h> 
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <utility>
-
-#include "../include/session.hpp"
-#include "../include/packet.hpp"
-#include "../include/Row.hpp"
-#include "../include/MasterTable.hpp"
+#include "../include/server.hpp"
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-#define PORT 4000
-#define MAX_THREADS 30 // maximum number of threads allowed
-#define MAX_TRIES 3 // maximum number of tries to send a notification to a client
-#define UNDEFINED_ID -1
-
-typedef struct __communication_params{
-  char* profile_name;
-  char* server_ip_address;
-  int port;
-  int local_listen_port;
-} communication_params;
-
-typedef struct __server_params{
-  char* type; // BACKUP ou PRIMARY
-  int local_clients_listen_port;
-  int local_servers_listen_port;
-  char* remote_primary_server_ip_address; // only if type= "backup"
-  int remote_primary_server_port; // only if type= "backup"
-} server_params;
-
-typedef struct __client {
-  char* ip;
-  int port;
-  int socketfd;
-} client_struct;
-
-typedef struct __server {
-  int server_id;
-  char* ip;
-  int port; // porta de listen para outros backups
-} server_struct;
 
 int next_session_id = 0;
 
@@ -1010,8 +949,6 @@ int main(int argc, char *argv[])
 	printf("Now listening for incoming connections... \n\n");
 
 	clilen = sizeof(struct sockaddr_in);
-
-	// TODO : criar uma thread e connexao (socket) para cada backup
 
 	if(is_primary){
 		my_backup_id = 0;

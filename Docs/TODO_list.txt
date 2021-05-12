@@ -28,11 +28,18 @@
 //////////////////////////////
 // extra features:
 
+-> mutexes
+	-> servers_table
+	-> num_backup_servers
+	-> was_notification_delivered
+
 -> hook on exit, ctrl+c, ctrl+d (do servidor):
 	-> mandar logout message do servidor pro cliente
 
 -> ao eleger um novo servidor primario
 	-> checar se cada sessao continua viva
+
+-> botar funcoes em comum de server.cpp e client.cpp num arquivo compartilhado
 
 -> play mp3
 
