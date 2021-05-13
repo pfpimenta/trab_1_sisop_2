@@ -19,6 +19,8 @@
 #include "../include/packet.hpp"
 #endif
 
+#define SMALL_BUFFER_SIZE (BUFFER_SIZE/10)
+
 class Row {
 	// a row corresponds to a user
 
@@ -52,7 +54,6 @@ class Row {
 		std::string getNotification();
 		void shared_reader_lock();
 		void shared_reader_unlock();
-		void serialize_row(char* buffer);
+		void serialize_row(char* buffer, std::string username);
+		void unserialize_row(char* buffer);
 };
-
-Row* unserialize_row(char* buffer);

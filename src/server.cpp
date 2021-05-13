@@ -540,7 +540,7 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
 
 	// send UPDATE_ROW packet
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
-	row->serialize_row(payload);
+	row->serialize_row(payload, username);
 	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
 	write_message(socketfd, buffer);
 
@@ -878,19 +878,24 @@ void * servers_socket_thread(void *arg) {
 		terminate_thread_and_socket(socket);
 	}
 
-	// TODO send cold UPDATE_BACKUP packets
-	seqn = send_all_servers_table(socket, seqn);
-	if(seqn == -1) {
-		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
-		terminate_thread_and_socket(socket);
-	}
+	// TODO tem segfault aqui:
+	// std::cout << "DEBUG antes send_all_servers_table" << std::endl;
+	// // TODO send cold UPDATE_BACKUP packets
+	// seqn = send_all_servers_table(socket, seqn);
+	// if(seqn == -1) {
+	// 	printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
+	// 	terminate_thread_and_socket(socket);
+	// }
+	// std::cout << "DEBUG depois send_all_servers_table" << std::endl;
 
+	std::cout << "DEBUG antes send_all_rows" << std::endl;
 	// TODO send cold UPDATE_ROW packets
 	seqn = send_all_rows(socket, seqn);
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socket);
 	}
+	std::cout << "DEBUG depois send_all_rows" << std::endl;
 
 	do {
 		// receive message
@@ -1044,7 +1049,7 @@ void * socket_thread(void *arg) {
 	if(get_termination_signal() == true){
 		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
 	} else if(send_tries > MAX_TRIES){
-		std::cout << "Client does not respond. Closing thread and socket." << std::endl;
+		std::cout << "Client " << currentUser << " does not respond. Closing thread and socket." << std::endl;
 	}
 	currentRow = masterTable->getRow(currentUser);
 	currentRow->closeSession(session_id);

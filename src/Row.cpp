@@ -142,25 +142,80 @@ void Row::shared_reader_unlock(){
 	pthread_mutex_unlock(&(this->reader_mutex));
 }
 
-void Row::serialize_row(char* buffer){
-	char* followers_buffer;
-	char* messages_to_receive_buffer;
-	char* sessions_buffer;
+void serialize_list(std::list<std::string> list, char* buffer) {
+	bool is_first = true;
+	char* aux_ptr = buffer;
+	int amount_writen;
+	memset(buffer, 0, SMALL_BUFFER_SIZE * sizeof(char));
+	for (auto const& elem : list) {
+		if(is_first){
+			// printa sem virgula 
+			amount_writen = snprintf(aux_ptr, BUFFER_SIZE, "%s", elem.c_str());
+			is_first = false;
+		} else {
+			// printa com virgula 
+			amount_writen = snprintf(aux_ptr, BUFFER_SIZE, "$%s", elem.c_str());
+		}
+		aux_ptr += amount_writen*sizeof(char);
+	}
+}
+
+void serialize_map(std::map< int*, session_struct*> sessions_map, char* buffer) {
+	bool is_first = true;
+	char* aux_ptr = buffer;
+	char* session_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	int amount_writen;
+	memset(buffer, 0, SMALL_BUFFER_SIZE * sizeof(char));
+	for (auto const& x : sessions_map) {
+		int* id_ptr = x.first;
+		session_struct* session_infos_ptr = x.second;
+		session_struct sessions_info;
+
+		serialize_session(sessions_info, session_buffer);
+
+		if(is_first){
+			// printa sem virgula 
+			amount_writen = snprintf(aux_ptr, BUFFER_SIZE, "%s", session_buffer);
+			is_first = false;
+		} else {
+			// printa com virgula 
+			amount_writen = snprintf(aux_ptr, BUFFER_SIZE, "$%s", session_buffer);
+		}
+		aux_ptr += amount_writen*sizeof(char);
+	}
+}
+
+void Row::serialize_row(char* buffer, std::string username) {
+	char* followers_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	char* messages_to_receive_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	char* sessions_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
  
-	// TODO serialize followers_buffer
-	// TODO serialize messages_to_receive_buffer
-	// TODO serialize sessions_buffer
+	// serialize followers_buffer
+	serialize_list(this->followers, followers_buffer);
+	std::cout << "DEBUG followers_buffer: " << followers_buffer << std::endl;
+
+	// serialize messages_to_receive_buffer
+	serialize_list(this->messages_to_receive, messages_to_receive_buffer);
+	std::cout << "DEBUG messages_to_receive_buffer: " << messages_to_receive_buffer << std::endl;
+	
+	// serialize sessions_buffer
+	serialize_map(this->sessions, sessions_buffer);
+	std::cout << "DEBUG sessions_buffer: " << sessions_buffer << std::endl;
 
 	memset(buffer, 0, BUFFER_SIZE * sizeof(char));
-	snprintf(buffer, BUFFER_SIZE, "%d#%B#%s#%s#%s\n",
+	snprintf(buffer, BUFFER_SIZE, "%s#%d#%d#%s#%s#%s\n",
+		username.c_str(),
 		this->active_sessions,
 		this->notification_delivered,
 		followers_buffer,
 		messages_to_receive_buffer,
 		sessions_buffer
 	);
+	
+	std::cout << "DEBUG row buffer: " << buffer << std::endl;
 }
 
-Row* unserialize_row(char* buffer){
+// saves the Row information in the buffer in this Row object
+void Row::unserialize_row(char* buffer){
 	// TODO
 }

@@ -20,3 +20,15 @@ void print_session(session_struct new_session)
     printf("last_received_seqn: %i\n", new_session.last_received_seqn);
     fflush(stdout);
 }
+
+// serializes the session_struct and puts it in the buffer
+void serialize_session(session_struct sessions_info, char* session_buffer) {
+  memset(session_buffer, 0, 600 * sizeof(char));
+  snprintf(session_buffer, 600, "%d&%s&%d&%d&%d",
+          sessions_info.session_id,
+          sessions_info.ip,
+          sessions_info.port,
+          sessions_info.seqn,
+          sessions_info.last_received_seqn);
+
+}
