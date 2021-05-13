@@ -169,7 +169,7 @@ void serialize_map(std::map< int*, session_struct*> sessions_map, char* buffer) 
 	for (auto const& x : sessions_map) {
 		int* id_ptr = x.first;
 		session_struct* session_infos_ptr = x.second;
-		session_struct sessions_info;
+		session_struct sessions_info = *session_infos_ptr;
 
 		serialize_session(sessions_info, session_buffer);
 
