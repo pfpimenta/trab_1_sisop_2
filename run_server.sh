@@ -1,4 +1,4 @@
 make clean
 make
-./server
+./server "primary" 4000 4001
 

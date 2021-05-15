@@ -508,17 +508,12 @@ int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
 }
 
 // cold send all server_struct inside servers_table
-int send_all_servers_table(int socketfd, int seqn){
-	int send_tries = 0;
-	packet received_packet;
-	char buffer[BUFFER_SIZE];
+int send_all_servers_table(int socketfd, int seqn) {
 	int status;
 
 	// TODO lock na servers table
 	for (auto const& x : servers_table) {
 		int* id_ptr = x.first;
-		server_struct* server_infos_ptr = x.second;
-
 		status = send_UPDATE_BACKUP(*id_ptr, seqn, socketfd);
 		if(status != 0) {
 			return -1;
@@ -573,15 +568,11 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
 
 // cold send all server_struct inside servers_table
 int send_all_rows(int socketfd, int seqn){
-	int send_tries = 0;
-	packet received_packet;
-	char buffer[BUFFER_SIZE];
 	int status;
 
 	// TODO lock na master table
 	for (auto const& x : masterTable->getTable()) {
 		std::string username = x.first;
-		Row* row = x.second;
 
 		status = send_UPDATE_ROW(username, seqn, socketfd);
 		if(status != 0) {

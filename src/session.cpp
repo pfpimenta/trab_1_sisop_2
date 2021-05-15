@@ -40,12 +40,13 @@ session_struct unserialize_session(char* session_buffer) {
   const char delimiter[2] = "&";
   char* rest = session_buffer;
   int payload_size = strlen(session_buffer);
-  rest = '\0';
+  session_buffer[payload_size] = '\0';
   // parse session_id
   token = strtok_r(rest, delimiter, &rest);
   sessions_info.session_id = atoi(token);
   // parse ip
   token = strtok_r(rest, delimiter, &rest);
+  sessions_info.ip = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
   strcpy(sessions_info.ip, token);
   // parse port
   token = strtok_r(rest, delimiter, &rest);
@@ -56,4 +57,6 @@ session_struct unserialize_session(char* session_buffer) {
   // parse last_received_seqn
   token = strtok_r(rest, delimiter, &rest);
   sessions_info.last_received_seqn = atoi(token);
+
+  return sessions_info;
 }

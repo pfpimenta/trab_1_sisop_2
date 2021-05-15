@@ -8,7 +8,6 @@
 #include <iostream>
 #include <map>
 
-
 #ifndef SESSION_H
 #define SESSION_H
 #include "../include/session.hpp"
@@ -18,8 +17,6 @@
 #define PACKET_H
 #include "../include/packet.hpp"
 #endif
-
-#define SMALL_BUFFER_SIZE (BUFFER_SIZE/10)
 
 class Row {
 	// a row corresponds to a user
@@ -55,5 +52,5 @@ class Row {
 		void shared_reader_lock();
 		void shared_reader_unlock();
 		void serialize_row(char* buffer, std::string username);
-		void unserialize_row(char* buffer);
+		std::string unserialize_row(char* buffer);
 };

@@ -143,6 +143,8 @@ void Row::shared_reader_unlock(){
 }
 
 void serialize_list(std::list<std::string> list, char* buffer) {
+	// lista serializada:
+	// <elem>$<elem>$...$<elem>
 	bool is_first = true;
 	char* aux_ptr = buffer;
 	int amount_writen;
@@ -161,15 +163,17 @@ void serialize_list(std::list<std::string> list, char* buffer) {
 }
 
 void serialize_map(std::map< int*, session_struct*> sessions_map, char* buffer) {
+	// map serializado:
+	// <session>$<session>$...$<session>
 	bool is_first = true;
 	char* aux_ptr = buffer;
 	char* session_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
 	int amount_writen;
 	memset(buffer, 0, SMALL_BUFFER_SIZE * sizeof(char));
 	for (auto const& x : sessions_map) {
-		int* id_ptr = x.first;
-		session_struct* session_infos_ptr = x.second;
-		session_struct sessions_info = *session_infos_ptr;
+		// session_struct* session_infos_ptr = x.second;
+		// session_struct sessions_info = *session_infos_ptr;
+		session_struct sessions_info = *x.second;
 
 		serialize_session(sessions_info, session_buffer);
 
@@ -186,6 +190,9 @@ void serialize_map(std::map< int*, session_struct*> sessions_map, char* buffer) 
 }
 
 void Row::serialize_row(char* buffer, std::string username) {
+	// Row serializada:
+	// <username>#<active_sessions>#<notification_delivered>#<followers_buffer>#<messages_to_receive_buffer>#<sessions_buffer>
+
 	char* followers_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
 	char* messages_to_receive_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
 	char* sessions_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
@@ -215,7 +222,86 @@ void Row::serialize_row(char* buffer, std::string username) {
 	std::cout << "DEBUG row buffer: " << buffer << std::endl;
 }
 
+std::list<std::string> unserialize_list(char* buffer) {
+	// lista serializada:
+	// <elem>$<elem>$...$<elem>
+	std::list<std::string>  parsed_list;
+	char* list_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	strcpy(list_buffer, buffer);
+	// parse
+	char* token;
+	const char delimiter[2] = "$";
+	char* rest = list_buffer;
+	int payload_size = strlen(list_buffer);
+	list_buffer[payload_size] = '\0';
+	while((token = strtok_r(rest, delimiter, &rest)) != NULL){
+		// parse element		
+		std::string parsed_element(token);
+		parsed_list.push_back(parsed_element);
+	}
+
+	return parsed_list;
+}
+
+std::map< int*, session_struct*> unserialize_map(char* buffer) {
+	// map serializado:
+	// <session>$<session>$...$<session>
+	std::map< int*, session_struct*> parsed_map;
+	char* map_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	char* session_buffer = (char*)malloc(sizeof(char)*SMALL_BUFFER_SIZE);
+	strcpy(map_buffer, buffer);
+	// parse
+	char* token;
+	const char delimiter[2] = "$";
+	char* rest = map_buffer;
+	int payload_size = strlen(map_buffer);
+	map_buffer[payload_size] = '\0';
+	while((token = strtok_r(rest, delimiter, &rest)) != NULL){
+		// parse session
+		strcpy(session_buffer, buffer);
+		session_struct parsed_session = unserialize_session(session_buffer);
+		session_struct* session_ptr = (session_struct*)malloc(sizeof(session_struct));
+		*session_ptr = parsed_session;
+		int* id_ptr = (int*)malloc(sizeof(int));
+		*id_ptr = parsed_session.session_id;
+		parsed_map.insert(std::make_pair(id_ptr, session_ptr));
+	}
+
+	return parsed_map;
+}
+
+
 // saves the Row information in the buffer in this Row object
-void Row::unserialize_row(char* buffer){
-	// TODO
+// returns the username
+std::string Row::unserialize_row(char* buffer){
+	// Row serializada:
+	// <username>#<active_sessions>#<notification_delivered>#<followers_buffer>#<messages_to_receive_buffer>#<sessions_buffer>
+
+	// parse
+	char* token;
+	const char delimiter[2] = "#";
+	char* rest = buffer;
+	int payload_size = strlen(buffer);
+	buffer[payload_size] = '\0';
+	// parse username
+	token = strtok_r(rest, delimiter, &rest);
+	std::string username(token);
+	// parse active_sessions
+	token = strtok_r(rest, delimiter, &rest);
+  	this->active_sessions = atoi(token);
+	// parse notification_delivered
+	token = strtok_r(rest, delimiter, &rest);
+  	this->notification_delivered = (bool)atoi(token);
+	// parse followers
+	token = strtok_r(rest, delimiter, &rest);
+	this->followers = unserialize_list(token);
+	// parse messages_to_receive
+	token = strtok_r(rest, delimiter, &rest);
+	this->messages_to_receive = unserialize_list(token);
+	// parse sessions
+	token = strtok_r(rest, delimiter, &rest);
+	this->sessions = unserialize_map(token);
+
+
+	return username;	
 }
