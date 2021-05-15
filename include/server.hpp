@@ -77,6 +77,8 @@ typedef struct __server {
   int port; // porta de listen para outros backups
 } server_struct;
 
+void print_server_struct(server_struct server_infos);
+
 int get_next_session_id();
 
 bool get_termination_signal();

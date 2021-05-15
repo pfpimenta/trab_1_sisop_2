@@ -8,10 +8,9 @@ int next_session_id = 0;
 int my_backup_id;
 int num_backup_servers = 0; // never decrements. used for attributing new backup server_ids
 
-MasterTable* masterTable;
-
-// TODO mutexes, transformar em classe!
-std::map< int*, server_struct* > servers_table;
+// tables containing the server information
+MasterTable* masterTable; // contains informations about the clients connected to the primary server
+std::map<int, server_struct* > servers_table; // contains informations about the backup tables // TODO mutexes & TODO transformar em classe!
 
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
@@ -21,6 +20,14 @@ bool is_primary = true;
 
 // parameters of this server (passed as arguments in the terminal console)
 server_params server_parameters;
+
+
+void print_server_struct(server_struct server_infos) {
+    printf("\nServer id: %i \n", server_infos.server_id);
+    printf("IP: %s \n", server_infos.ip);
+    printf("port: %i \n", server_infos.port);
+    fflush(stdout);
+}
 
 // serializes the server_struct and puts it in the buffer
 void serialize_server_struct(server_struct server_infos, char* buffer)
@@ -470,7 +477,12 @@ int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
 	server_struct* backup_infos_ptr;
 
 	// get server_struct
-	backup_infos_ptr = servers_table.find(&backup_id)->second;
+	// check if this server_struct exists at the table
+	if(servers_table.find(backup_id) == servers_table.end()) {
+		std::cout << "DEBUG nao existe " << std::endl;
+	}
+	backup_infos_ptr = servers_table.find(backup_id)->second;
+	print_server_struct(*backup_infos_ptr);
 	backup_infos = *backup_infos_ptr;
 
 	// send UPDATE_BACKUP packet
@@ -513,8 +525,8 @@ int send_all_servers_table(int socketfd, int seqn) {
 
 	// TODO lock na servers table
 	for (auto const& x : servers_table) {
-		int* id_ptr = x.first;
-		status = send_UPDATE_BACKUP(*id_ptr, seqn, socketfd);
+		int server_id = x.first;
+		status = send_UPDATE_BACKUP(server_id, seqn, socketfd);
 		if(status != 0) {
 			return -1;
 		}
@@ -712,6 +724,23 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 	return -1;
 }
 
+int cold_replication(int socketfd, int seqn) {
+
+	seqn = send_all_servers_table(socketfd, seqn);
+	if(seqn == -1) {
+		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
+		terminate_thread_and_socket(socketfd);
+	}
+	
+	seqn = send_all_rows(socketfd, seqn);
+	if(seqn == -1) {
+		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
+		terminate_thread_and_socket(socketfd);
+	}
+	
+	return seqn;
+}
+
 // Thread designated to communicate with the primary server (thread roda no backup)
 void * primary_communication_thread(void *arg) {
 	int socket = *((int *)arg);
@@ -772,6 +801,7 @@ void * primary_communication_thread(void *arg) {
 						{
 							max_reference_seqn = received_packet.seqn;
 							// TODO
+							std::cout << "DEBUG received UPDATE_ROW " << std::endl;
 							send_ACK(socket, received_packet.seqn);
 							break;
 						}
@@ -779,7 +809,7 @@ void * primary_communication_thread(void *arg) {
 						{
 							max_reference_seqn = received_packet.seqn;
 							// TODO
-							printf("DEBUG UPDATE_BACKUP payload: %s", received_packet._payload);
+							printf("DEBUG received UPDATE_BACKUP... payload: %s", received_packet._payload);
 							send_ACK(socket, received_packet.seqn);
 							break;
 						}
@@ -849,15 +879,13 @@ void * servers_socket_thread(void *arg) {
 		num_backup_servers++;
 		backup_infos.server_id = num_backup_servers;
 	}
-	int* server_id_ptr = (int*)malloc(sizeof(int));
-	*server_id_ptr = backup_infos.server_id;
 
 	// check if this backup server is already in servers_table
-	if(servers_table.find(server_id_ptr) == servers_table.end()){
+	if(servers_table.find(backup_infos.server_id) == servers_table.end()){
 		// this backup server is not yet in the table... adding it!
 		server_struct* backup_infos_ptr = (server_struct*)malloc(sizeof(server_struct));
 		*backup_infos_ptr = backup_infos;
-		servers_table.insert(std::make_pair( server_id_ptr, backup_infos_ptr));
+		servers_table.insert(std::make_pair(backup_infos.server_id, backup_infos_ptr));
 	}
 
 	// send SET_ID (attribute a new unique incremented ID to the server)
@@ -869,25 +897,10 @@ void * servers_socket_thread(void *arg) {
 		terminate_thread_and_socket(socket);
 	}
 
-	// TODO tem segfault aqui:
-	// std::cout << "DEBUG antes send_all_servers_table" << std::endl;
-	// // TODO send cold UPDATE_BACKUP packets
-	// seqn = send_all_servers_table(socket, seqn);
-	// if(seqn == -1) {
-	// 	printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
-	// 	terminate_thread_and_socket(socket);
-	// }
-	// std::cout << "DEBUG depois send_all_servers_table" << std::endl;
+	// cold replication of masterTable and servers_table
+	seqn = cold_replication(socket, seqn);
 
-	std::cout << "DEBUG antes send_all_rows" << std::endl;
-	// TODO send cold UPDATE_ROW packets
-	seqn = send_all_rows(socket, seqn);
-	if(seqn == -1) {
-		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
-		terminate_thread_and_socket(socket);
-	}
-	std::cout << "DEBUG depois send_all_rows" << std::endl;
-
+	std::cout << "Starting backup-primary communication loop with backup " << backup_infos.server_id << std::endl;
 	do {
 		// receive message
 		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);

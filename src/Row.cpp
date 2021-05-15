@@ -199,15 +199,12 @@ void Row::serialize_row(char* buffer, std::string username) {
  
 	// serialize followers_buffer
 	serialize_list(this->followers, followers_buffer);
-	std::cout << "DEBUG followers_buffer: " << followers_buffer << std::endl;
 
 	// serialize messages_to_receive_buffer
 	serialize_list(this->messages_to_receive, messages_to_receive_buffer);
-	std::cout << "DEBUG messages_to_receive_buffer: " << messages_to_receive_buffer << std::endl;
 	
 	// serialize sessions_buffer
 	serialize_map(this->sessions, sessions_buffer);
-	std::cout << "DEBUG sessions_buffer: " << sessions_buffer << std::endl;
 
 	memset(buffer, 0, BUFFER_SIZE * sizeof(char));
 	snprintf(buffer, BUFFER_SIZE, "%s#%d#%d#%s#%s#%s\n",
