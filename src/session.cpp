@@ -30,5 +30,30 @@ void serialize_session(session_struct sessions_info, char* session_buffer) {
           sessions_info.port,
           sessions_info.seqn,
           sessions_info.last_received_seqn);
+}
 
+// unserializes the session_struct and puts it in the buffer
+session_struct unserialize_session(char* session_buffer) {
+  session_struct sessions_info;
+  // parse
+  char* token;
+  const char delimiter[2] = "&";
+  char* rest = session_buffer;
+  int payload_size = strlen(session_buffer);
+  rest = '\0';
+  // parse session_id
+  token = strtok_r(rest, delimiter, &rest);
+  sessions_info.session_id = atoi(token);
+  // parse ip
+  token = strtok_r(rest, delimiter, &rest);
+  strcpy(sessions_info.ip, token);
+  // parse port
+  token = strtok_r(rest, delimiter, &rest);
+  sessions_info.port = atoi(token);
+  // parse seqn
+  token = strtok_r(rest, delimiter, &rest);
+  sessions_info.seqn = atoi(token);
+  // parse last_received_seqn
+  token = strtok_r(rest, delimiter, &rest);
+  sessions_info.last_received_seqn = atoi(token);
 }
