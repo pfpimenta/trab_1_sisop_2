@@ -1,6 +1,6 @@
--> serialize server_table
+-> recebimento das replicações
 
--> unserialize server_table
+-> envio das replicações HOT
 
 -> replicação das infos do RM primario para os backups
 	-> COLD: na conexao de um novo backup, primario deve mandar todas as informaçoes pro backup
