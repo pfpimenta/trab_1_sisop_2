@@ -86,6 +86,9 @@ void MasterTable::addRow(Row* newRow, std::string username) {
 	{
 		this->table.insert( std::make_pair( username, newRow) );
 		this->save_backup_table();
+	} else {
+		// update row
+		// TODO
 	}
 	pthread_mutex_unlock(&(this->read_write_mutex));
 }

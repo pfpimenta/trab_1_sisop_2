@@ -1,4 +1,6 @@
 -> recebimento das replicações
+	-> debugar segfault
+	-> completar MasterTable::addRow
 
 -> envio das replicações HOT
 

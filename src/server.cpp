@@ -950,12 +950,12 @@ void * servers_socket_thread(void *arg) {
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-		// send update, if there is any
-		status = send_UPDATE_BACKUP(current_server_id, seqn, socket);
-		if(status == 0){
-			send_tries++;
-			sleep(1);
-		}
+		// TODO send update, if there is any
+		// status = send_UPDATE_BACKUP(current_server_id, seqn, socket);
+		// if(status == 0){
+		// 	send_tries++;
+		// 	sleep(1);
+		// }
   	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
 	if(get_termination_signal() == true){
 		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
@@ -1025,12 +1025,14 @@ void * socket_thread(void *arg) {
 							max_reference_seqn = received_packet.seqn;
 							session_id = get_next_session_id();
 							currentUser = receive_CONNECT(received_packet, socket, thread_id, seqn, session_id);
+							// TODO por na fila de updates pros backups
 							break;
 						}
 						case TYPE_FOLLOW:
 						{
 							max_reference_seqn = received_packet.seqn;
 							receive_FOLLOW(received_packet, socket, currentUser);
+							// TODO por na fila de updates pros backups
 							break;
 						}
 						case TYPE_SEND:
