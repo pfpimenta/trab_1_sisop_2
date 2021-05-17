@@ -28,6 +28,7 @@ class MasterTable {
         int followUser(std::string followed, std::string follower);
         void sendMessageToFollowers(std::string username, std::string message);
         Row* getRow(std::string username);
+        void addRow(Row* newRow, std::string username);
         std::map< std::string, Row*> getTable();
         void load_backup_table();
         void save_backup_table();

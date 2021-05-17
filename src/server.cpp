@@ -800,17 +800,24 @@ void * primary_communication_thread(void *arg) {
 						case TYPE_UPDATE_ROW:
 						{
 							max_reference_seqn = received_packet.seqn;
-							// TODO
-							std::cout << "DEBUG received UPDATE_ROW " << std::endl;
+							std::cout << "DEBUG received UPDATE_ROW ... payload: " << received_packet._payload << std::endl;
+							Row* newRow = new Row;
+							std::string username = newRow->unserialize_row(received_packet._payload);
+							masterTable->addRow(newRow, username);
 							send_ACK(socket, received_packet.seqn);
 							break;
 						}
 						case TYPE_UPDATE_BACKUP:
 						{
 							max_reference_seqn = received_packet.seqn;
-							// TODO
-							printf("DEBUG received UPDATE_BACKUP... payload: %s", received_packet._payload);
+							std::cout << "DEBUG received UPDATE_BACKUP ... payload: " << received_packet._payload << std::endl;
+							server_struct backup_infos = unserialize_server_struct(received_packet._payload);
+							server_struct* backup_infos_ptr = (server_struct*)malloc(sizeof(server_struct));
+							*backup_infos_ptr = backup_infos;
+							servers_table.insert(std::make_pair(backup_infos.server_id, backup_infos_ptr));
+							std::cout << "DEBUG sending UPDATE_BACKUP ACK..." << std::endl;
 							send_ACK(socket, received_packet.seqn);
+							std::cout << "DEBUG sent UPDATE_BACKUP ACK" << std::endl;
 							break;
 						}
 						case TYPE_ACK:
@@ -824,6 +831,7 @@ void * primary_communication_thread(void *arg) {
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		std::cout << "DEBUG 1" << std::endl;
 
 		// mandar pings pro primario
 		t1 = std::time(0); // get timestamp atual
@@ -834,6 +842,7 @@ void * primary_communication_thread(void *arg) {
 			send_ping_to_primary(socket, seqn);
 			seqn++;
 		}
+		std::cout << "DEBUG 2" << std::endl;
 
 		// detect if primary server has died
 		if(send_tries > MAX_TRIES) {
@@ -842,6 +851,7 @@ void * primary_communication_thread(void *arg) {
 			// TODO eleicao
 			// TODO mandar pro cliente SERVER_CHANGE
 		}
+		std::cout << "DEBUG 3" << std::endl;
   	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
 	if(get_termination_signal() == true){
 		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
@@ -923,11 +933,13 @@ void * servers_socket_thread(void *arg) {
 						case TYPE_HEARTBEAT:
 						{
 							max_reference_seqn = received_packet.seqn;
+							std::cout << "DEBUG received HEARTBEAT ... seqn: " << received_packet.seqn << std::endl;
 							send_ACK(socket, received_packet.seqn);
 							break;
 						}
 						case TYPE_ACK:
 						{
+							std::cout << "DEBUG received ACK ... seqn: " << received_packet.seqn << std::endl;
 							send_tries = 0;
 							break;
 						}

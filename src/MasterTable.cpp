@@ -79,6 +79,17 @@ Row* MasterTable::getRow(std::string username){
 	return currentRow;
 }
 
+void MasterTable::addRow(Row* newRow, std::string username) {
+	pthread_mutex_lock(&(this->read_write_mutex));
+	bool usernameDoesNotExist = (this->table.find(username) == this->table.end());
+	if(usernameDoesNotExist)
+	{
+		this->table.insert( std::make_pair( username, newRow) );
+		this->save_backup_table();
+	}
+	pthread_mutex_unlock(&(this->read_write_mutex));
+}
+
 std::map< std::string, Row*> MasterTable::getTable(){
 	return this->table;
 }

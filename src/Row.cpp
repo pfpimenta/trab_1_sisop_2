@@ -299,6 +299,5 @@ std::string Row::unserialize_row(char* buffer){
 	token = strtok_r(rest, delimiter, &rest);
 	this->sessions = unserialize_map(token);
 
-
 	return username;	
 }
