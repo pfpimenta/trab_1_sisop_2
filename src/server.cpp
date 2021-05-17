@@ -491,6 +491,7 @@ int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
 	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
 	serialize_packet(packet_to_send, buffer);
 	write_message(socketfd, buffer);
+	std::cout << "DEBUG sending UPDATE_BACKUP" << std::endl;
 
 	// receive ACK from backup
 	do {
@@ -507,6 +508,7 @@ int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
+					std::cout << "DEBUG send_UPDATE_BACKUP received ACK" << std::endl;
 					return 0;
 				}
 			}
@@ -515,7 +517,7 @@ int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
 		send_tries++;
 		sleep(1);
 	} while(send_tries <= MAX_TRIES);
-
+	std::cout << "DEBUG send_UPDATE_BACKUP did NOT received ACK !!!!!!!!!!!!!!!!!!!!!" << std::endl;
 	return -1;
 }
 
@@ -548,8 +550,10 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
 	// send UPDATE_ROW packet
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 	row->serialize_row(payload, username);
-	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
+	packet_to_send = create_packet(payload, TYPE_UPDATE_ROW, seqn);
 	write_message(socketfd, buffer);
+	std::cout << "DEBUG send_UPDATE_ROW sent!" << std::endl;
+
 
 	// receive ACK from backup
 	do {
@@ -566,6 +570,7 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
+					std::cout << "DEBUG send_UPDATE_ROW received ACK" << std::endl;
 					return 0;
 				}
 			}
@@ -574,8 +579,9 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
 		send_tries++;
 		sleep(1);
 	} while(send_tries <= MAX_TRIES);
-
-	return 0;
+	
+	std::cout << "DEBUG send_UPDATE_ROW did NOT received ACK!!!!!!!!!!!!!!!!!!!" << std::endl;
+	return -1;
 }
 
 // cold send all server_struct inside servers_table
@@ -713,6 +719,7 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
+					std::cout << "DEBUG send_SET_ID received ACK" << std::endl;
 					return 0;
 				}
 			}
@@ -831,18 +838,17 @@ void * primary_communication_thread(void *arg) {
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
-		std::cout << "DEBUG 1" << std::endl;
 
 		// mandar pings pro primario
 		t1 = std::time(0); // get timestamp atual
 		if(t1 - t0 > 3) // every 3 seconds
 		{
+			std::cout << "DEBUG reset timer" << std::endl;
 			t0 = t1; // reset timer
 			send_tries++;
 			send_ping_to_primary(socket, seqn);
 			seqn++;
 		}
-		std::cout << "DEBUG 2" << std::endl;
 
 		// detect if primary server has died
 		if(send_tries > MAX_TRIES) {
@@ -851,7 +857,6 @@ void * primary_communication_thread(void *arg) {
 			// TODO eleicao
 			// TODO mandar pro cliente SERVER_CHANGE
 		}
-		std::cout << "DEBUG 3" << std::endl;
   	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
 	if(get_termination_signal() == true){
 		std::cout << "Got termination signal. Closing thread and socket." << std::endl;

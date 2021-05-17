@@ -1,1 +1,1 @@
-/server "backup" 4002 4003 localhost 4001
+./server "backup" 4002 4003 localhost 4001
