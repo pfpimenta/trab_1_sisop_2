@@ -357,21 +357,23 @@ void receive_DISCONNECT(std::string currentUser, int socket, pthread_t thread_id
 
 int receive_SET_ID(int socket){
 	int backup_id;
-	char buffer[BUFFER_SIZE];		
+	char message_received[BUFFER_SIZE];
+	char buffer[BUFFER_SIZE];
 	int size = 0;
 	packet received_packet;
 	bzero(buffer, BUFFER_SIZE); //clear buffer
+	bzero(message_received, BUFFER_SIZE); //clear buffer
 
 	// receive message
 	while(size < 1){
 		// try to read until it receives the message
-		size = recv(socket, buffer, BUFFER_SIZE-1, 0);
+		size = recv(socket, message_received, BUFFER_SIZE-1, 0);
 	}
-	buffer[size] = '\0';
+	message_received[size] = '\0';
 
 	// parse socket buffer: get several messages, if there are more than one
 	char* token_end_of_packet;
-	char* rest_packet = buffer;
+	char* rest_packet = message_received;
 	while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 	{
 		strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
@@ -418,24 +420,26 @@ int receive_ACK(packet received_packet, std::string currentUser, int seqn) {
 
 server_struct receive_CONNECT_SERVER(int socketfd){
 	// TODO : se o primary nao receber nada, essa thread vai ficar rodando em loop aqui
+	char received_message[BUFFER_SIZE];		
 	char buffer[BUFFER_SIZE];		
 	int size = 0;
 	packet received_packet;
 	server_struct server_info;
 
 	// receive CONNECT_SERVER message
-	bzero(buffer, BUFFER_SIZE); //clear buffer
+	bzero(received_message, BUFFER_SIZE); //clear buffer
 	while(size < 1){
 		// try to read until it receives the message
-		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		size = recv(socketfd, received_message, BUFFER_SIZE-1, 0);
 	}
-	buffer[size] = '\0';
+	received_message[size] = '\0';
 
 	// parse socket buffer: get several messages, if there are more than one
 	char* token_end_of_packet;
-	char* rest_packet = buffer;
+	char* rest_packet = received_message;
 	while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 	{
+		bzero(buffer, BUFFER_SIZE); //clear buffer
 		strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 		received_packet = buffer_to_packet(buffer);
 		if(received_packet.type != TYPE_CONNECT_SERVER){
@@ -502,17 +506,11 @@ int send_UPDATE_BACKUP(int receiving_server_id, int seqn, int socketfd, int back
 	std::cout << "DEBUG aqui 2d " << std::endl;
 	std::cout << "DEBUG aqui 2e " << std::endl;
 
-	while(1){
-		std::cout << "DEBUG loop " << std::endl;
-		sleep(1);
-	}
-
 	return 0;
 }
 
 // cold send all server_struct inside servers_table
 int send_all_servers_table(int socketfd, int seqn, int backup_id) {
-	return 0;
 	int status;
 
 	// TODO lock na servers table
@@ -526,6 +524,7 @@ int send_all_servers_table(int socketfd, int seqn, int backup_id) {
 		}
 		seqn++;
 	}
+	return seqn;
 }
 
 int send_UPDATE_ROW(std::string username, int seqn, int socketfd, int backup_id){
@@ -606,6 +605,7 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
+	char message_received[BUFFER_SIZE];
 	int size;
 	int send_tries = 0;
 	packet received_packet, packet_to_send;
@@ -618,15 +618,17 @@ int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 	write_message(socketfd, buffer);
 
 	// receive ACK from primary
+	bzero(buffer, BUFFER_SIZE); //clear payload buffer
+	bzero(message_received, BUFFER_SIZE); //clear payload buffer
 	do {
 		// receive message
-		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		size = recv(socketfd, message_received, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			buffer[size] = '\0';
+			message_received[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
 			char* token_end_of_packet;
-			char* rest_packet = buffer;
+			char* rest_packet = message_received;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
@@ -686,12 +688,14 @@ int send_UPDATE(int backup_id, int seqn, int socketfd) {
 int send_SET_ID(int socketfd, int seqn, int backup_id){
 	char payload[PAYLOAD_SIZE];
 	char buffer[BUFFER_SIZE];
+	char message_received[BUFFER_SIZE];
 	int size;
 	int send_tries = 0;
 	packet received_packet, packet_to_send;
 
 	// send SET_ID packet to backup server
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
+	bzero(message_received, BUFFER_SIZE); //clear payload buffer
 	snprintf(payload, PAYLOAD_SIZE, "%d", backup_id);
 	packet_to_send = create_packet(payload, TYPE_SET_ID, seqn);
 	serialize_packet(packet_to_send, buffer);
@@ -700,15 +704,16 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 	// receive ACK from backup
 	do {
 		// receive message
-		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
+		size = recv(socketfd, message_received, BUFFER_SIZE-1, 0);
 		if (size > 0) {
-			buffer[size] = '\0';
+			message_received[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
 			char* token_end_of_packet;
-			char* rest_packet = buffer;
+			char* rest_packet = message_received;
 			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
 			{
+				bzero(buffer, BUFFER_SIZE); //clear payload buffer
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
@@ -728,6 +733,7 @@ int cold_replication(int socketfd, int seqn, int backup_id) {
 	std::cout << "Starting cold replication..." << std::endl;
 
 	seqn = send_all_servers_table(socketfd, seqn, backup_id);
+	return 0;
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socketfd);
