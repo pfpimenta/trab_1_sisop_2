@@ -261,7 +261,7 @@ void send_notification(int socket, Row* currentRow, int seqn) {
 
 	// send notification
 	notification = currentRow->getNotification();
-	strcpy(payload, notification.c_str());
+	strncpy(payload, notification.c_str(), notification.length());
 	packet_to_send = create_packet(payload, TYPE_MSG, seqn);
 	serialize_packet(packet_to_send, buffer);
 	write_message(socket, buffer);
@@ -493,25 +493,39 @@ int send_UPDATE_BACKUP(int receiving_server_id, int seqn, int socketfd, int back
 	std::cout << "DEBUG packet_to_send " << std::endl;
 	print_packet(packet_to_send);
 	// put UPDATE_BACKUP packet in the FIFO
+	std::cout << "DEBUG aqui 1a " << std::endl;
 	packet_to_send_table.find(backup_id)->second.push_back(packet_to_send);
+	std::cout << "DEBUG aqui 2a " << std::endl;
+	sleep(1);
+	std::cout << "DEBUG aqui 2b " << std::endl;
+	std::cout << "DEBUG aqui 2c " << std::endl;
+	std::cout << "DEBUG aqui 2d " << std::endl;
+	std::cout << "DEBUG aqui 2e " << std::endl;
+
+	while(1){
+		std::cout << "DEBUG loop " << std::endl;
+		sleep(1);
+	}
 
 	return 0;
 }
 
 // cold send all server_struct inside servers_table
 int send_all_servers_table(int socketfd, int seqn, int backup_id) {
+	return 0;
 	int status;
 
 	// TODO lock na servers table
 	for (auto const& x : servers_table) {
 		int server_id = x.first;
+		std::cout << "DEBUG aqui 1 " << std::endl;
 		status = send_UPDATE_BACKUP(server_id, seqn, socketfd, backup_id);
+		std::cout << "DEBUG aqui 2 " << std::endl;
 		if(status != 0) {
 			return -1;
 		}
 		seqn++;
 	}
-	return seqn;
 }
 
 int send_UPDATE_ROW(std::string username, int seqn, int socketfd, int backup_id){
@@ -529,6 +543,7 @@ int send_UPDATE_ROW(std::string username, int seqn, int socketfd, int backup_id)
 	packet_to_send = create_packet(payload, TYPE_UPDATE_ROW, seqn);
 	// put UPDATE_ROW packet in the FIFO
 	packet_to_send_table.find(backup_id)->second.push_back(packet_to_send);
+	
 	return 0;
 }
 
@@ -575,7 +590,7 @@ int send_message_to_client(std::string currentUser, int seqn, int socket){
 				} else {
 					// consume notification but DO NOT remove it from the FIFO
 					notification = currentRow->getNotification();
-					strcpy(payload, notification.c_str());
+					strncpy(payload, notification.c_str(), notification.length());
 					packet_to_send = create_packet(payload, 0, seqn);
 					serialize_packet(packet_to_send, buffer);
 					write_message(socket, buffer);
