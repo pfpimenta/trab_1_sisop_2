@@ -13,7 +13,7 @@ packet create_packet(char* message, int packet_type, int seqn)
 // serializes the packet and puts it in the buffer
 void serialize_packet(packet packet_to_send, char* buffer)
 {
-  memset(buffer, 0, BUFFER_SIZE * sizeof(char));
+  memset(buffer, 0, (packet_to_send.length + 30)* sizeof(char));
   snprintf(buffer, BUFFER_SIZE, "%u,%u,%u,%s\n",
           packet_to_send.seqn, packet_to_send.length, packet_to_send.type, packet_to_send._payload);
 }
@@ -84,6 +84,24 @@ const char* get_packet_type_string(int packet_type)
     break;
   case 6:
     return "DISCONNECT";
+    break;
+  case 7:
+    return "SET_ID";
+    break;
+  case 8:
+    return "UPDATE_ROW";
+    break;
+  case 9:
+    return "UPDATE_BACKUP";
+    break;
+  case 10:
+    return "HEARTBEAT";
+    break;
+  case 11:
+    return "SERVER_CHANGE";
+    break;
+  case 12:
+    return "CONNECT_SERVER";
     break;
   default:
     printf("ERROR: invalid packet type\n");

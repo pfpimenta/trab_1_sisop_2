@@ -1,6 +1,7 @@
 #include "../include/server.hpp"
 
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex for the FIFO for packets to send to backups
 
 int next_session_id = 0;
 
@@ -11,6 +12,7 @@ int num_backup_servers = 0; // never decrements. used for attributing new backup
 // tables containing the server information
 MasterTable* masterTable; // contains informations about the clients connected to the primary server
 std::map<int, server_struct* > servers_table; // contains informations about the backup tables // TODO mutexes & TODO transformar em classe!
+std::map<int, std::list<packet>> packet_to_send_table; // contains the packets to send to each backup
 
 // Global termination flag, set by the signal handler.
 bool termination_signal = false;
@@ -467,68 +469,43 @@ server_struct receive_CONNECT_SERVER(int socketfd){
 	return server_info;
 }
 
-int send_UPDATE_BACKUP(int backup_id, int seqn, int socketfd){
+int send_UPDATE_BACKUP(int receiving_server_id, int seqn, int socketfd, int backup_id){
 	int size;
 	int send_tries = 0;
 	char payload[PAYLOAD_SIZE];
-	char buffer[BUFFER_SIZE];
 	packet packet_to_send, received_packet;
 	server_struct backup_infos;
 	server_struct* backup_infos_ptr;
 
 	// get server_struct
 	// check if this server_struct exists at the table
-	if(servers_table.find(backup_id) == servers_table.end()) {
+	if(servers_table.find(receiving_server_id) == servers_table.end()) {
 		std::cout << "DEBUG nao existe " << std::endl;
 	}
-	backup_infos_ptr = servers_table.find(backup_id)->second;
+	backup_infos_ptr = servers_table.find(receiving_server_id)->second;
 	print_server_struct(*backup_infos_ptr);
 	backup_infos = *backup_infos_ptr;
 
-	// send UPDATE_BACKUP packet
+	// create UPDATE_BACKUP
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 	serialize_server_struct(backup_infos, payload);
 	packet_to_send = create_packet(payload, TYPE_UPDATE_BACKUP, seqn);
-	serialize_packet(packet_to_send, buffer);
-	write_message(socketfd, buffer);
-	std::cout << "DEBUG sending UPDATE_BACKUP" << std::endl;
+	std::cout << "DEBUG packet_to_send " << std::endl;
+	print_packet(packet_to_send);
+	// put UPDATE_BACKUP packet in the FIFO
+	packet_to_send_table.find(backup_id)->second.push_back(packet_to_send);
 
-	// receive ACK from backup
-	do {
-		// receive message
-		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
-		if (size > 0) {
-			buffer[size] = '\0';
-
-			// parse socket buffer: get several messages, if there are more than one
-			char* token_end_of_packet;
-			char* rest_packet = buffer;
-			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
-			{
-				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
-				received_packet = buffer_to_packet(buffer);
-				if(received_packet.type == TYPE_ACK){
-					std::cout << "DEBUG send_UPDATE_BACKUP received ACK" << std::endl;
-					return 0;
-				}
-			}
-		}
-		write_message(socketfd, buffer);
-		send_tries++;
-		sleep(1);
-	} while(send_tries <= MAX_TRIES);
-	std::cout << "DEBUG send_UPDATE_BACKUP did NOT received ACK !!!!!!!!!!!!!!!!!!!!!" << std::endl;
-	return -1;
+	return 0;
 }
 
 // cold send all server_struct inside servers_table
-int send_all_servers_table(int socketfd, int seqn) {
+int send_all_servers_table(int socketfd, int seqn, int backup_id) {
 	int status;
 
 	// TODO lock na servers table
 	for (auto const& x : servers_table) {
 		int server_id = x.first;
-		status = send_UPDATE_BACKUP(server_id, seqn, socketfd);
+		status = send_UPDATE_BACKUP(server_id, seqn, socketfd, backup_id);
 		if(status != 0) {
 			return -1;
 		}
@@ -537,62 +514,33 @@ int send_all_servers_table(int socketfd, int seqn) {
 	return seqn;
 }
 
-int send_UPDATE_ROW(std::string username, int seqn, int socketfd){
+int send_UPDATE_ROW(std::string username, int seqn, int socketfd, int backup_id){
 	int size;
 	int send_tries = 0;
 	char payload[PAYLOAD_SIZE];
-	char buffer[BUFFER_SIZE];
-	packet packet_to_send, received_packet;
+	packet packet_to_send;
 
 	// TODO lock na row
 	Row* row = masterTable->getRow(username);
 
-	// send UPDATE_ROW packet
+	// put UPDATE_ROW packet in the FIFO
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 	row->serialize_row(payload, username);
 	packet_to_send = create_packet(payload, TYPE_UPDATE_ROW, seqn);
-	write_message(socketfd, buffer);
-	std::cout << "DEBUG send_UPDATE_ROW sent!" << std::endl;
-
-
-	// receive ACK from backup
-	do {
-		// receive message
-		size = recv(socketfd, buffer, BUFFER_SIZE-1, 0);
-		if (size > 0) {
-			buffer[size] = '\0';
-
-			// parse socket buffer: get several messages, if there are more than one
-			char* token_end_of_packet;
-			char* rest_packet = buffer;
-			while((token_end_of_packet = strtok_r(rest_packet, "\n", &rest_packet)) != NULL)
-			{
-				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
-				received_packet = buffer_to_packet(buffer);
-				if(received_packet.type == TYPE_ACK){
-					std::cout << "DEBUG send_UPDATE_ROW received ACK" << std::endl;
-					return 0;
-				}
-			}
-		}
-		write_message(socketfd, buffer);
-		send_tries++;
-		sleep(1);
-	} while(send_tries <= MAX_TRIES);
-	
-	std::cout << "DEBUG send_UPDATE_ROW did NOT received ACK!!!!!!!!!!!!!!!!!!!" << std::endl;
-	return -1;
+	// put UPDATE_ROW packet in the FIFO
+	packet_to_send_table.find(backup_id)->second.push_back(packet_to_send);
+	return 0;
 }
 
 // cold send all server_struct inside servers_table
-int send_all_rows(int socketfd, int seqn){
+int send_all_rows(int socketfd, int seqn, int backup_id){
 	int status;
 
 	// TODO lock na master table
 	for (auto const& x : masterTable->getTable()) {
 		std::string username = x.first;
 
-		status = send_UPDATE_ROW(username, seqn, socketfd);
+		status = send_UPDATE_ROW(username, seqn, socketfd, backup_id);
 		if(status != 0) {
 			return -1;
 		}
@@ -669,6 +617,7 @@ int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
 				if(received_packet.type == TYPE_ACK){
+					std::cout << "DEBUG send_CONNECT_SERVER received ACK" << std::endl;
 					return 0;
 				}
 			}
@@ -677,6 +626,7 @@ int send_CONNECT_SERVER(int socketfd, int seqn, int port) {
 		send_tries++;
 		sleep(3);
 	} while(send_tries <= MAX_TRIES);
+	std::cout << "DEBUG send_CONNECT_SERVER did NOT receive ACK !!!!!!!!!!!!" << std::endl;
 	return -1;
 }
 
@@ -685,8 +635,36 @@ void send_ping_to_primary(int socketfd, int seqn){
 	char buffer[BUFFER_SIZE];
 	bzero(payload, PAYLOAD_SIZE); //clear payload buffer
 	packet packet_to_send = create_packet(payload, TYPE_HEARTBEAT, seqn);
+	bzero(buffer, BUFFER_SIZE); //clear buffer
 	serialize_packet(packet_to_send, buffer);
 	write_message(socketfd, buffer);
+	std::cout << "DEBUG sent HEARTBEAT" << std::endl;
+}
+
+// tries to send message if there is any in the FIFO
+int send_UPDATE(int backup_id, int seqn, int socketfd) {
+	// returns 0 if message was sent
+	// returns -1 if message was not sent
+	// returns -2 if there no message to send
+	int status;
+	char buffer[BUFFER_SIZE];
+  	packet packet_to_send;
+	pthread_mutex_lock(&packets_to_send_mutex);
+	std::list<packet> packets_to_send_fifo = packet_to_send_table.find(backup_id)->second;
+	if(packets_to_send_fifo.empty()) {
+		status = -2;
+	} else {
+		// serialize and send the packet
+		packet_to_send = packets_to_send_fifo.front();
+		std::cout << "DEBUG packet to send: " << std::endl;
+		print_packet(packet_to_send);
+		serialize_packet(packet_to_send, buffer);
+		std::cout << "DEBUG sending buffer: " << buffer << std::endl;
+		status = write_message(socketfd, buffer);
+	}
+	pthread_mutex_unlock(&packets_to_send_mutex);
+
+	return status;
 }
 
 // send SET_ID and wait for ACK. returns 0 if success
@@ -731,15 +709,15 @@ int send_SET_ID(int socketfd, int seqn, int backup_id){
 	return -1;
 }
 
-int cold_replication(int socketfd, int seqn) {
+int cold_replication(int socketfd, int seqn, int backup_id) {
+	std::cout << "Starting cold replication..." << std::endl;
 
-	seqn = send_all_servers_table(socketfd, seqn);
+	seqn = send_all_servers_table(socketfd, seqn, backup_id);
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socketfd);
 	}
-	
-	seqn = send_all_rows(socketfd, seqn);
+	seqn = send_all_rows(socketfd, seqn, backup_id);
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socketfd);
@@ -789,6 +767,7 @@ void * primary_communication_thread(void *arg) {
 		// receive message
 		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
+			std::cout << "DEBUG received buffer: " << backup_server_message << std::endl;
 			backup_server_message[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
@@ -829,6 +808,7 @@ void * primary_communication_thread(void *arg) {
 						}
 						case TYPE_ACK:
 						{
+							std::cout << "DEBUG received ACK" << std::endl;
 							send_tries = 0;
 							break;
 						}
@@ -894,6 +874,7 @@ void * servers_socket_thread(void *arg) {
 		num_backup_servers++;
 		backup_infos.server_id = num_backup_servers;
 	}
+	current_server_id = backup_infos.server_id;
 
 	// check if this backup server is already in servers_table
 	if(servers_table.find(backup_infos.server_id) == servers_table.end()){
@@ -902,24 +883,27 @@ void * servers_socket_thread(void *arg) {
 		*backup_infos_ptr = backup_infos;
 		servers_table.insert(std::make_pair(backup_infos.server_id, backup_infos_ptr));
 	}
-
 	// send SET_ID (attribute a new unique incremented ID to the server)
 	status = send_SET_ID(socket, seqn, backup_infos.server_id);
 	if(status == 0){
 		seqn++;
+		// create FIFO for this backup
+		std::list<packet> empty_list;
+		packet_to_send_table.insert(std::make_pair(current_server_id, empty_list));
 	} else {
 		printf("ERROR: could not send ID to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socket);
 	}
 
 	// cold replication of masterTable and servers_table
-	seqn = cold_replication(socket, seqn);
+	seqn = cold_replication(socket, seqn, current_server_id);
 
 	std::cout << "Starting backup-primary communication loop with backup " << backup_infos.server_id << std::endl;
 	do {
 		// receive message
 		size = recv(socket, backup_server_message, BUFFER_SIZE-1, 0);
 		if (size > 0) {
+			std::cout << "DEBUG received backup_server_message: " << backup_server_message << std::endl;
 			backup_server_message[size] = '\0';
 
 			// parse socket buffer: get several messages, if there are more than one
@@ -929,9 +913,11 @@ void * servers_socket_thread(void *arg) {
 			{
 				strcpy(buffer, token_end_of_packet); // put token_end_of_packet in buffer
 				received_packet = buffer_to_packet(buffer);
+				print_packet(received_packet);
 
 				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
 					// already received this message
+					std::cout << "DEBUG sent ACK" << std::endl;
 					send_ACK(socket, received_packet.seqn);
 				} else {
 					switch (received_packet.type) {
@@ -945,6 +931,8 @@ void * servers_socket_thread(void *arg) {
 						case TYPE_ACK:
 						{
 							std::cout << "DEBUG received ACK ... seqn: " << received_packet.seqn << std::endl;
+							std::list<packet> packets_to_send_fifo = packet_to_send_table.find(backup_infos.server_id)->second;
+							packets_to_send_fifo.pop_front();
 							send_tries = 0;
 							break;
 						}
@@ -954,13 +942,25 @@ void * servers_socket_thread(void *arg) {
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		if(send_tries > 0){
+			sleep(3);
+		}
 
-		// TODO send update, if there is any
-		// status = send_UPDATE_BACKUP(current_server_id, seqn, socket);
-		// if(status == 0){
-		// 	send_tries++;
-		// 	sleep(1);
-		// }
+		// send update, if there is any
+		status = send_UPDATE(current_server_id, seqn, socket);
+		if(status == 0){
+			// success
+			std::cout << "DEBUG sent a message!!! to backup with id: " << current_server_id << std::endl;
+			send_tries++;
+			seqn++;
+		} else if (status == -1){
+			// there is a message but it wasn't sent
+			std::cout << "Failed to send a message to backup with id: " << current_server_id << std::endl;
+			send_tries++;
+			sleep(1);
+		} else {		 // else: nao tinha mensaegm pra mandar
+			std::cout << "DEBUG empty FIFO for backup with id: " << current_server_id << std::endl;
+		}
   	}while (get_termination_signal() == false && send_tries <= MAX_TRIES);
 	if(get_termination_signal() == true){
 		std::cout << "Got termination signal. Closing thread and socket." << std::endl;
