@@ -1,5 +1,7 @@
 #include "../include/server.hpp"
 
+char payload[PAYLOAD_SIZE];
+
 pthread_mutex_t termination_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t packets_to_send_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex for the FIFO for packets to send to backups
 
@@ -44,17 +46,22 @@ server_struct unserialize_server_struct(char* buffer)
 {
   server_struct server_infos;
   char payload[PAYLOAD_SIZE];
+	std::cout << " DEBUG 1" << std::endl;
 
   int buffer_size = strlen(buffer);
+	std::cout << " DEBUG 1b" << std::endl;
+
   buffer[buffer_size] = '\0';
   char* token;
   const char delimiter[2] = ",";
   char* rest = buffer;
+	std::cout << " DEBUG 2" << std::endl;
   
   // server_id
   token = strtok_r(rest, delimiter, &rest);
   server_infos.server_id = atoi(token);
 
+	std::cout << " DEBUG 3" << std::endl;
   // ip
   bzero(payload, PAYLOAD_SIZE); //clear payload buffer
   token = strtok_r(rest, delimiter, &rest);
@@ -63,6 +70,7 @@ server_struct unserialize_server_struct(char* buffer)
   payload[ip_len] = '\0';
   server_infos.ip = (char*) malloc((ip_len) * sizeof(char) + 1);
   memcpy(server_infos.ip, payload, (ip_len) * sizeof(char) + 1);
+	std::cout << " DEBUG 4" << std::endl;
 
   // port
   token = strtok_r(rest, "", &rest);
@@ -70,7 +78,6 @@ server_struct unserialize_server_struct(char* buffer)
 
   return server_infos;
 }
-
 
 int get_next_session_id(){
 	pthread_mutex_lock(&termination_signal_mutex);
@@ -476,7 +483,7 @@ server_struct receive_CONNECT_SERVER(int socketfd){
 int send_UPDATE_BACKUP(int receiving_server_id, int seqn, int socketfd, int backup_id){
 	int size;
 	int send_tries = 0;
-	char payload[PAYLOAD_SIZE];
+	// char* payload = (char*) malloc((PAYLOAD_SIZE) * sizeof(char) + 1);
 	packet packet_to_send, received_packet;
 	server_struct backup_infos;
 	server_struct* backup_infos_ptr;
@@ -497,14 +504,7 @@ int send_UPDATE_BACKUP(int receiving_server_id, int seqn, int socketfd, int back
 	std::cout << "DEBUG packet_to_send " << std::endl;
 	print_packet(packet_to_send);
 	// put UPDATE_BACKUP packet in the FIFO
-	std::cout << "DEBUG aqui 1a " << std::endl;
 	packet_to_send_table.find(backup_id)->second.push_back(packet_to_send);
-	std::cout << "DEBUG aqui 2a " << std::endl;
-	sleep(1);
-	std::cout << "DEBUG aqui 2b " << std::endl;
-	std::cout << "DEBUG aqui 2c " << std::endl;
-	std::cout << "DEBUG aqui 2d " << std::endl;
-	std::cout << "DEBUG aqui 2e " << std::endl;
 
 	return 0;
 }
@@ -516,9 +516,7 @@ int send_all_servers_table(int socketfd, int seqn, int backup_id) {
 	// TODO lock na servers table
 	for (auto const& x : servers_table) {
 		int server_id = x.first;
-		std::cout << "DEBUG aqui 1 " << std::endl;
 		status = send_UPDATE_BACKUP(server_id, seqn, socketfd, backup_id);
-		std::cout << "DEBUG aqui 2 " << std::endl;
 		if(status != 0) {
 			return -1;
 		}
@@ -530,7 +528,7 @@ int send_all_servers_table(int socketfd, int seqn, int backup_id) {
 int send_UPDATE_ROW(std::string username, int seqn, int socketfd, int backup_id){
 	int size;
 	int send_tries = 0;
-	char payload[PAYLOAD_SIZE];
+	// char* payload = (char*) malloc((PAYLOAD_SIZE) * sizeof(char) + 1);
 	packet packet_to_send;
 
 	// TODO lock na row
@@ -733,11 +731,11 @@ int cold_replication(int socketfd, int seqn, int backup_id) {
 	std::cout << "Starting cold replication..." << std::endl;
 
 	seqn = send_all_servers_table(socketfd, seqn, backup_id);
-	return 0;
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_BACKUP packets to backup.\n"); fflush(stdout);
 		terminate_thread_and_socket(socketfd);
 	}
+	std::cout << "DEBUG seqn: " << seqn << std::endl;
 	seqn = send_all_rows(socketfd, seqn, backup_id);
 	if(seqn == -1) {
 		printf("ERROR: could not send cold UPDATE_ROW packets to backup.\n"); fflush(stdout);
@@ -800,6 +798,7 @@ void * primary_communication_thread(void *arg) {
 				received_packet = buffer_to_packet(buffer);
 
 				if(received_packet.seqn <= max_reference_seqn && received_packet.type != TYPE_ACK){
+					std::cout << "DEBUG  already received this message - seqn: " << received_packet.seqn << std::endl;
 					// already received this message
 					send_ACK(socket, received_packet.seqn);
 				} else {
@@ -819,8 +818,11 @@ void * primary_communication_thread(void *arg) {
 							max_reference_seqn = received_packet.seqn;
 							std::cout << "DEBUG received UPDATE_BACKUP ... payload: " << received_packet._payload << std::endl;
 							server_struct backup_infos = unserialize_server_struct(received_packet._payload);
+							std::cout << "DEBUG 11111111 " << std::endl;
 							server_struct* backup_infos_ptr = (server_struct*)malloc(sizeof(server_struct));
+							std::cout << "DEBUG 22222222222 " << std::endl;
 							*backup_infos_ptr = backup_infos;
+							std::cout << "DEBUG 333333333333 " << std::endl;
 							servers_table.insert(std::make_pair(backup_infos.server_id, backup_infos_ptr));
 							std::cout << "DEBUG sending UPDATE_BACKUP ACK..." << std::endl;
 							send_ACK(socket, received_packet.seqn);

@@ -11,8 +11,7 @@ session_struct create_session(int session_id, char* ip, int port, int seqn, int 
   return new_session;
 }
 
-void print_session(session_struct new_session)
-{
+void print_session(session_struct new_session) {
     printf("\nSession id: %i \n", new_session.session_id);
     printf("IP: %s \n", new_session.ip);
     printf("port: %i \n", new_session.port);

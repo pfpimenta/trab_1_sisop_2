@@ -4,7 +4,7 @@
 #include <string>
 #include <string.h>
 
-#define PAYLOAD_SIZE 60000
+#define PAYLOAD_SIZE 2000
 #define BUFFER_SIZE PAYLOAD_SIZE+50
 #define SMALL_BUFFER_SIZE (BUFFER_SIZE/10)
 
